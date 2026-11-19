@@ -345,6 +345,14 @@ def plot_optimization_results(history, true_optimum=None,
     eval_idx = np.arange(N)
     best_aligned = np.maximum.accumulate(y)
     best_per_iter = np.asarray(history['best_value'])
+    best_idx = int(np.argmax(y))
+    best_value = float(y[best_idx])
+    best_position = X[best_idx]
+    target_label = {'ed': 'ED', 'ed_pf_ratio': 'ED/PF'}.get(
+        history.get('target'), 'Objective')
+    position_text = ', '.join(f'{axis}={value:.3f}'
+                              for axis, value in zip(('X', 'Y', 'Z'), best_position))
+    best_text = f'Max {target_label}={best_value:.6g}\n{position_text}'
     fig = plt.figure(figsize=(15, 10))
 
     # (1) BO 每轮改进量 + xi 调度。
@@ -421,9 +429,11 @@ def plot_optimization_results(history, true_optimum=None,
             ax3.scatter(X[n_init:, 0], X[n_init:, 1], X[n_init:, 2],
                         c='steelblue', s=20, alpha=0.5, label=f'BO ({N - n_init})')
         ax3.scatter(X[-5:, 0], X[-5:, 1], X[-5:, 2], c='blue', s=50, label='Final 5')
-        bi = int(np.argmax(y))
-        ax3.scatter(*X[bi], c='gold', s=200, marker='*', edgecolors='black',
-                    label=f'Best (V={y[bi]:.4g}, r={r_norm[bi]:.1f})')
+        ax3.scatter(*best_position, c='gold', s=200, marker='*', edgecolors='black',
+                    label=f'Max {target_label}={best_value:.6g}')
+        ax3.text2D(0.98, 0.98, best_text, transform=ax3.transAxes, fontsize=8,
+                   ha='right', va='top', bbox=dict(boxstyle='round', facecolor='white',
+                                          edgecolor='darkgoldenrod', alpha=0.95))
         if true_optimum is not None:
             ax3.scatter(*np.asarray(true_optimum), c='green', s=200,
                         marker='X', edgecolors='black', label='True Optimum')
@@ -448,6 +458,14 @@ def plot_optimization_results(history, true_optimum=None,
         ax4.plot(eval_idx[n_init:], y[n_init:], 'o-', ms=3,
                  color='steelblue', alpha=0.65, label=f'BO evaluations ({N - n_init})')
     ax4.plot(eval_idx, best_aligned, '-', lw=1.5, color='black', label='Best so far')
+    ax4.scatter(best_idx, best_value, c='gold', s=160, marker='*',
+                edgecolors='black', zorder=5, label='Maximum')
+    ax4.annotate(best_text, xy=(best_idx, best_value),
+                 xytext=(0.03, 0.97), textcoords='axes fraction',
+                 ha='left', va='top', fontsize=8,
+                 bbox=dict(boxstyle='round', facecolor='white',
+                           edgecolor='darkgoldenrod', alpha=0.95),
+                 arrowprops=dict(arrowstyle='->', color='darkgoldenrod'), zorder=6)
     if 0 < n_init < N:
         ax4.axvline(n_init - 0.5, color='gray', ls=':', label='end of init')
     ax4.set_xlabel('Evaluation Index')
@@ -455,14 +473,15 @@ def plot_optimization_results(history, true_optimum=None,
     ax4.set_title(f'Convergence (best={best_aligned[-1]:.4g})')
     ax4.grid(True, alpha=0.4)
     ax4.xaxis.set_major_locator(MaxNLocator(nbins=10, integer=True))
-    ax4.legend(fontsize=8)
+    ax4.legend(fontsize=8, loc='lower right')
     r_str = ""
     if true_optimum is not None:
         r_str = (f" | r_best={r_norm[np.argmax(y)]:.2f}"
                  f" | r_min={r_norm.min():.2f}")
-    fig.suptitle(f'BO[EI]: best={best_aligned[-1]:.6g} | '
-                 f'evals={N} (init={n_init} + BO={N - n_init}){r_str}', fontsize=12)
-    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    fig.suptitle(f'BO[EI]: Max {target_label}={best_value:.6g} | '
+                 f'evals={N} (init={n_init} + BO={N - n_init}){r_str}\n'
+                 f'Best position: {position_text}', fontsize=12)
+    plt.tight_layout(rect=[0, 0, 1, 0.94])
     if show:
         plt.show()
     return fig
