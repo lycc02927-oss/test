@@ -20,6 +20,11 @@
 值相对偏差 = |当前最佳值 - 参考值| / |参考值| × 100%；参考值为 0 且非精确命中时留空，
 同时保留值的绝对偏差。value_bias_pct 保留正负号，可识别观测值高于参考值。
 iteration=0 表示初始扫描。
+总路程按实际采样中心顺序计算：第一个初始点 → 全部初始点/BO采样点 → 最终最佳点。
+X/Y/Z 分别累计相邻位置的绝对位移，包含末次采样回到最佳点的一段。
+comparison.csv 新增 total_distance_x_mean/y_mean/z_mean 三列，每列按 init_10/20/30/40
+列出有效运行的平均总路程；results.csv 保留每次路程，summary.csv 保留分组数值。
+已有结果可用 --report-only 从 histories/*.npz 补算，无需重新寻优。
 默认参考值是无抖动 RBF 模型的多起点数值参考最优，不保证是全局解析最优。
 --reference-file 可提供已知理论值，CSV 列为 data_model,target,value,x,y,z，
 每个模型分别填写 ed 和 ed_pf_ratio 两行。CSV 可直接用 Excel 打开。
@@ -68,6 +73,8 @@ VALUE_TOLERANCE_PCT = 10.0
 PLAN_FIELDS = ['case_id', 'data_model', 'model_name', 'target', 'init_points', 'repeat', 'seed']
 POSITION_FIELDS = [f'{axis}_{metric}' for axis in ('x', 'y', 'z')
                    for metric in ('abs_distance', 'relative_position_error_pct')]
+TRAVEL_FIELDS = [f'total_distance_{axis}' for axis in ('x', 'y', 'z')]
+TRAVEL_MEAN_FIELDS = [field + '_mean' for field in TRAVEL_FIELDS]
 RESULT_FIELDS = PLAN_FIELDS + [
     'status', 'accuracy_passed', 'value_tolerance_pct',
     'convergence_iters', 'bo_iters', 'n_init_actual', 'total_evaluations',
@@ -76,6 +83,7 @@ RESULT_FIELDS = PLAN_FIELDS + [
     'reference_method', 'reference_value', 'reference_x', 'reference_y', 'reference_z',
     'value_abs_error', 'value_bias_pct', 'value_relative_error_pct',
     *POSITION_FIELDS,
+    *TRAVEL_FIELDS,
     'elapsed_seconds', 'history_file', 'iterations_file', 'error',
 ]
 ITERATION_FIELDS = PLAN_FIELDS + [
@@ -93,7 +101,7 @@ SUMMARY_FIELDS = [
     'convergence_iters_median', 'convergence_iters_min', 'convergence_iters_max',
     'bo_iters_mean', 'total_evaluations_mean', 'best_value_mean', 'elapsed_seconds_mean',
     'value_relative_error_pct_mean',
-] + [field + '_mean' for field in POSITION_FIELDS]
+] + [field + '_mean' for field in POSITION_FIELDS] + TRAVEL_MEAN_FIELDS
 
 
 def make_plan(models=DATA_MODELS, repeats=REPEATS, base_seed=BASE_SEED):
@@ -364,6 +372,33 @@ def write_csv(path, fields, rows):
     temporary.replace(path)
 
 
+def calculate_total_distances(history):
+    """设定中心逐轴累计路程，最后返回最终最佳点；不计首点之前的运动。"""
+    positions = np.asarray(history['X'], dtype=float)
+    final_best = np.asarray(history['best_x'][-1], dtype=float)
+    distances = np.abs(np.diff(positions, axis=0)).sum(axis=0)
+    distances += np.abs(positions[-1] - final_best)
+    return dict(zip(TRAVEL_FIELDS, (float(value) for value in distances)))
+
+
+def backfill_total_distances(directory, records):
+    """从已保存的真实采样轨迹补算，缺少轨迹时保留空值。"""
+    missing = []
+    for row in records.values():
+        if row['status'] == 'error' or all(row.get(field) not in ('', None) for field in TRAVEL_FIELDS):
+            continue
+        history_file = row.get('history_file')
+        if not history_file or not (directory / history_file).exists():
+            missing.append(row['case_id'])
+            continue
+        with np.load(directory / history_file, allow_pickle=False) as history:
+            row.update(calculate_total_distances(history))
+    if missing:
+        print(f'{len(missing)} 条结果缺少原始 history，累计路程留空；请补齐 histories 文件后重建报告。',
+              flush=True)
+    return missing
+
+
 def summarize(plan, records):
     """仅对已触发停止条件的运行统计收敛次数；上限与失败分别计数。"""
     groups = {}
@@ -395,10 +430,10 @@ def summarize(plan, records):
             convergence_iters_min=min(iterations) if iterations else '',
             convergence_iters_max=max(iterations) if iterations else '',
             **{column + '_mean': statistics.mean(float(row[column]) for row in valid
-                                                 if row[column] != '')
-               if any(row[column] != '' for row in valid) else ''
+                                                 if row.get(column) not in ('', None))
+               if any(row.get(column) not in ('', None) for row in valid) else ''
                for column in ('bo_iters', 'total_evaluations', 'best_value', 'elapsed_seconds',
-                              'value_relative_error_pct', *POSITION_FIELDS)},
+                              'value_relative_error_pct', *POSITION_FIELDS, *TRAVEL_FIELDS)},
         ))
     return summary
 
@@ -418,10 +453,38 @@ def write_reports(directory, plan, records):
                  if mean != '' else 'N/A')
         entry[f"init_{row['init_points']}"] = (
             f"{value} ({row['converged_runs']}/{row['valid_runs']})")
+        for field in TRAVEL_MEAN_FIELDS:
+            mean_distance = row[field]
+            distance_text = f'{mean_distance:.2f}' if mean_distance != '' else 'N/A'
+            entry.setdefault(field, []).append(f"init_{row['init_points']}={distance_text}")
+    for entry in comparison.values():
+        for field in TRAVEL_MEAN_FIELDS:
+            entry[field] = '; '.join(entry[field])
     write_csv(directory / 'comparison.csv',
-              ['data_model', 'model_name', 'target'] + [f'init_{n}' for n in INIT_POINTS],
+              ['data_model', 'model_name', 'target'] + [f'init_{n}' for n in INIT_POINTS]
+              + TRAVEL_MEAN_FIELDS,
               comparison.values())
     return summary
+
+
+def refresh_travel_reports(output_dir):
+    """兼容既有批测目录：补齐单次路程并重建比较表，不重新调用寻优。"""
+    directory = Path(output_dir).resolve()
+    if not (directory / 'results.csv').exists():
+        return
+    with (directory / 'results.csv').open(encoding='utf-8-sig', newline='') as stream:
+        records = {row['case_id']: row for row in csv.DictReader(stream)}
+    plan_file = directory / 'plan.csv'
+    if plan_file.exists():
+        with plan_file.open(encoding='utf-8-sig', newline='') as stream:
+            plan = list(csv.DictReader(stream))
+    else:
+        plan = [{field: row[field] for field in PLAN_FIELDS} for row in records.values()]
+    for case in plan:
+        for field in ('data_model', 'init_points', 'repeat', 'seed'):
+            case[field] = int(case[field])
+    backfill_total_distances(directory, records)
+    write_reports(directory, plan, records)
 
 
 def merge_iterations(directory, plan, records):
@@ -523,7 +586,11 @@ def export_excel_results(output_dir):
                     value, number_format = excel_value(row[field], field)
                     cell = WriteOnlyCell(sheet, value=value)
                     cell.number_format = number_format
+                    if name == 'Comparison':
+                        cell.alignment = Alignment(wrap_text=True, vertical='top')
                     cells.append(cell)
+                if name == 'Comparison':
+                    sheet.row_dimensions[count + 2].height = 60
                 sheet.append(cells)
                 count += 1
             sheet.auto_filter.ref = f'A1:{get_column_letter(len(fields))}{count + 1}'
@@ -609,6 +676,7 @@ def plot_convergence_results(excel_file, output_dir=None, show=False):
 
 
 def generate_excel_and_plots(output_dir):
+    refresh_travel_reports(output_dir)
     excel_file = export_excel_results(output_dir)
     plots = plot_convergence_results(excel_file)
     print(f'Excel：{excel_file}\n绘图：' + ', '.join(str(path) for path in plots), flush=True)
@@ -698,6 +766,7 @@ def run_batch(*, models=DATA_MODELS, repeats=REPEATS, base_seed=BASE_SEED,
     if resume and results_file.exists():
         with results_file.open(encoding='utf-8-sig', newline='') as stream:
             records = {row['case_id']: row for row in csv.DictReader(stream)}
+        backfill_total_distances(directory, records)
     history_dir = directory / 'histories'
     history_dir.mkdir(exist_ok=True)
     iterations_dir = directory / 'iterations'
@@ -733,6 +802,7 @@ def run_batch(*, models=DATA_MODELS, repeats=REPEATS, base_seed=BASE_SEED,
                    for name in ('ed', 'pf', 'ed_pf_ratio')},
                 history_file=f'histories/{case_id}.npz',
                 iterations_file=f'iterations/{case_id}.csv')
+            row.update(calculate_total_distances(history))
             deviations = iteration_deviations(
                 case, history, reference, value_tolerance_pct)
             final = deviations[-1]

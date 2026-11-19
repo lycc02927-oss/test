@@ -1,5 +1,8 @@
 """联合收敛条件、数值步骤一致性和 Excel 结果提取的回归检查。"""
 
+import contextlib
+import csv
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -127,6 +130,71 @@ class ReportTests(unittest.TestCase):
             self.assertTrue(np.isnan(calls[1][0][1]))
             self.assertTrue(np.all(np.isnan(calls[5][0])))
             self.assertEqual(len({color for _, color in calls[:6]}), 6)
+
+
+class TravelTests(unittest.TestCase):
+    @staticmethod
+    def history(scale=1.):
+        positions = np.array([[0., 0., 0.], [2., -3., 1.],
+                              [-1., 5., 4.], [1., 4., -2.]]) * scale
+        return {'X': positions, 'best_x': positions[[1]]}
+
+    def test_axis_totals_include_reversals_and_return_to_best(self):
+        result = batch.calculate_total_distances(self.history())
+        self.assertEqual([result[field] for field in batch.TRAVEL_FIELDS], [8., 19., 13.])
+        history = self.history()
+        history['best_x'] = history['X'][[-1]]
+        result = batch.calculate_total_distances(history)
+        self.assertEqual([result[field] for field in batch.TRAVEL_FIELDS], [7., 12., 10.])
+
+    def test_one_point_has_no_travel_before_first_position(self):
+        point = np.array([[100., -200., 50.]])
+        result = batch.calculate_total_distances({'X': point, 'best_x': point})
+        self.assertEqual(list(result.values()), [0., 0., 0.])
+
+    def test_old_histories_backfill_without_rerunning_and_keep_init_groups(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            (directory / 'histories').mkdir()
+            plan = batch.make_plan(models=(1,), repeats=2)
+            old_fields = [field for field in batch.RESULT_FIELDS if field not in batch.TRAVEL_FIELDS]
+            rows = []
+            for case in plan:
+                if case['target'] != 'ed' or case['init_points'] not in (10, 20):
+                    continue
+                scale = (1 if case['init_points'] == 10 else 2) + 2 * (case['repeat'] - 1)
+                history = self.history(scale)
+                history_file = f"histories/{case['case_id']}.npz"
+                np.savez_compressed(directory / history_file, **history)
+                row = {field: '' for field in old_fields}
+                row.update(case)
+                row.update(status='converged' if case['repeat'] == 1 else 'max_iter',
+                           convergence_iters=3 if case['repeat'] == 1 else '',
+                           history_file=history_file)
+                rows.append(row)
+            batch.write_csv(directory / 'plan.csv', batch.PLAN_FIELDS, plan)
+            batch.write_csv(directory / 'results.csv', old_fields, rows)
+            with patch.object(batch, 'run_search_with_accuracy', side_effect=AssertionError('rerun')):
+                batch.refresh_travel_reports(directory)
+            with (directory / 'comparison.csv').open(encoding='utf-8-sig', newline='') as stream:
+                reader = csv.DictReader(stream)
+                self.assertEqual(reader.fieldnames[-3:], batch.TRAVEL_MEAN_FIELDS)
+                self.assertEqual(len(reader.fieldnames), 10)
+                comparison = [row for row in reader if row['target'] == 'ed'][0]
+            self.assertEqual(comparison['total_distance_x_mean'],
+                             'init_10=16.00; init_20=24.00; init_30=N/A; init_40=N/A')
+            self.assertEqual(comparison['total_distance_y_mean'],
+                             'init_10=38.00; init_20=57.00; init_30=N/A; init_40=N/A')
+            self.assertEqual(comparison['total_distance_z_mean'],
+                             'init_10=26.00; init_20=39.00; init_30=N/A; init_40=N/A')
+            self.assertEqual(comparison['init_10'], '3.00 +/- 0.00 (1/2)')
+            with (directory / 'results.csv').open(encoding='utf-8-sig', newline='') as stream:
+                updated = list(csv.DictReader(stream))
+            self.assertTrue(all(row[field] != '' for row in updated for field in batch.TRAVEL_FIELDS))
+            missing = {'case_id': 'missing', 'status': 'max_iter', 'history_file': 'missing.npz'}
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(batch.backfill_total_distances(directory, {'missing': missing}), ['missing'])
+            self.assertNotIn('total_distance_x', missing)
 
 
 if __name__ == '__main__':
