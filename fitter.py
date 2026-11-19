@@ -72,7 +72,7 @@ def _get_default_fitter(model_id):
 
 def run_pipeline(center, half_width=10.0, random_seed=42,
                  fitter=None, *, ed_time_model=None, pf_model=None):
-    """兼容 use_fitter.py：返回一发 ED/PF，复用传入的随机数流和时间模型。"""
+    """返回一发 ED/PF，复用传入的随机数流和时间模型。"""
     rng = np.random.default_rng(random_seed)
     spatial_model = _get_default_fitter(measurement_data.MODEL_ID) if fitter is None else fitter
     ed_time_model = TimeJitter(seed=rng.integers(0, 2**63)) if ed_time_model is None else ed_time_model

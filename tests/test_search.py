@@ -131,11 +131,5 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(len(figure.axes), 6)  # 四张图、xi 副轴、色条。
         plt.close(figure)
 
-    def test_legacy_mock_imports(self):
-        import use_fitter
-        from fitter import run_pipeline
-        self.assertIs(use_fitter.run_pipeline, run_pipeline)
-
-
 if __name__ == '__main__':
     unittest.main()
