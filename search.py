@@ -17,8 +17,7 @@ from kernel import SumKernel, MaternKernel, WhiteKernel
 from GPR import GaussianProcessRegressor
 from EI import expected_improvement
 from LHS import get_initial_points
-from fitter import EDFitter, EDPFModel
-from formula_models import FORMULA_CONFIGS, build_formula_ed_model
+from fitter import EDFitter, EDPFModel, FORMULA_CONFIGS, build_formula_ed_model
 
 
 # -------------------- 修改这里切换模型和运行参数 --------------------
@@ -46,7 +45,7 @@ _energy_model = None
 
 def set_ed_model(source="fitted", *, formula_model="formula_gaussian",
                  data_model=3, fit_method="rbf", fit_parameters=None,
-                 seed=42, **sampling_parameters):
+                 seed=42, peaks=None, **sampling_parameters):
     """选择 ED 空间模型；量测与抖动共用原 fitter.EDPFModel。
 
     sampling_parameters 可传 position_half_width、ed_time_parameters、
@@ -54,7 +53,7 @@ def set_ed_model(source="fitted", *, formula_model="formula_gaussian",
     """
     global _energy_model
     if source == "formula":
-        spatial_model = build_formula_ed_model(formula_model)
+        spatial_model = build_formula_ed_model(formula_model, peaks=peaks)
     elif source == "fitted":
         spatial_model = EDFitter(data_model, fit_method, fit_parameters)
     else:
@@ -489,7 +488,7 @@ def plot_optimization_results(history, true_optimum=None,
 
 def run_search(*, source=None, target=None, formula_model=None, data_model=None,
                fit_method=None, seed=None, bounds=None, show=True,
-               fit_parameters=None, sampling_parameters=None, **bo_parameters):
+               fit_parameters=None, sampling_parameters=None, peaks=None, **bo_parameters):
     """建立模型、寻优、打印最佳单发结果并按需绘图，返回 history。"""
     source = ED_SOURCE if source is None else source
     target = TARGET if target is None else target
@@ -500,7 +499,7 @@ def run_search(*, source=None, target=None, formula_model=None, data_model=None,
     bounds = BOUNDS if bounds is None else bounds
     sensor = set_ed_model(source, formula_model=formula_model, data_model=data_model,
                           fit_method=fit_method, fit_parameters=fit_parameters,
-                          seed=seed, **(sampling_parameters or {}))
+                          seed=seed, peaks=peaks, **(sampling_parameters or {}))
     parameters = {**BO_PARAMETERS, **bo_parameters}
     history = bayesian_optimization(make_objective(target), bounds,
                                      random_seed=seed, **parameters)
