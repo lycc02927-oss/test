@@ -1,0 +1,100 @@
+"""从已有 CSV 生成 Excel。可以脱离 GA 重新导出，不用重新跑寻优。"""
+import argparse
+import csv
+from pathlib import Path
+
+TABS = {
+    "selection": "入选配方", "overall": "配方总评", "summary": "工况汇总", "trials": "逐次试验",
+    "points": "采样轨迹", "recipes": "全部配方", "generations": "代际进展",
+    "members": "每代成员", "models": "模型参考", "settings": "试验设置",
+    "seeds": "随机种子", "grid": "编码档位",
+}
+TEXT = {"role", "stage", "phase", "stop", "chromosome", "parameter", "name", "plan"}
+PERCENT = {"error", "mean_error", "error_limit", "success_rate", "worst_failure_rate",
+           "mean_failure_rate", "crossover", "bit_mutation"}
+
+
+def parse(key, value):
+    if not value:
+        return None
+    if key in TEXT:
+        return value
+    # 初始点数、试验编号保留整数类型；ED 和偏差保留浮点精度。
+    return float(value) if "." in value or "e" in value.lower() else int(value)
+
+
+def column(index):
+    label = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        label = chr(65 + remainder) + label
+    return label
+
+
+def sheet_rows(directory, key):
+    """迭代产出表头和行；尽量避免在导出时多存一份完整采样轨迹。"""
+    with (directory / (key + ".csv")).open(encoding="utf-8-sig", newline="") as f:
+        reader = csv.reader(f)
+        headers = next(reader)
+        if key == "trials":
+            yield headers + ["error_check", "travel_check", "loss_check"]
+        else:
+            yield headers
+        col = {h: column(i) for i, h in enumerate(headers, 1)}
+        for n, row in enumerate(reader, 2):
+            values = [parse(k, v) for k, v in zip(headers, row)]
+            if key == "trials":
+                ed = col["best_ed"] + str(n)
+                peak = col["design_ed"] + str(n)
+                sample = col["samples"] + str(n)
+                axes = [col["travel_" + a] + str(n) for a in "xyz"]
+                error_check = column(len(headers) + 1) + str(n)
+                travel_check = column(len(headers) + 2) + str(n)
+                # 试验设置 F/G/I 为三个归一化分母，J/K/L 为权重。
+                settings = "'试验设置'!"
+                score = (f"=({error_check}/{settings}$F$2*{settings}$J$2"
+                         f"+{sample}/{settings}$G$2*{settings}$K$2"
+                         f"+{travel_check}/{settings}$I$2*{settings}$L$2)"
+                         f"/SUM({settings}$J$2:$L$2)")
+                values += [f"=ABS({ed}-{peak})/ABS({peak})", f"=MAX({','.join(axes)})", score]
+            yield values
+
+
+def export(directory):
+    # 沿用仓库 batch_test 的 Excel 依赖。原始 CSV 始终保留。
+    from openpyxl import Workbook
+    from openpyxl.cell import WriteOnlyCell
+    from openpyxl.styles import Font, PatternFill
+
+    # standard 会有较多轨迹行，流式写入使内存占用与行数无关。
+    workbook = Workbook(write_only=True)
+    for key, title in TABS.items():
+        sheet = workbook.create_sheet(title)
+        rows = sheet_rows(directory, key)
+        headers = next(rows)
+        sheet.freeze_panes = "A2"
+        styled_headers = []
+        for index, header in enumerate(headers, 1):
+            width = 54 if header == "chromosome" else max(14, len(header) + 3)
+            sheet.column_dimensions[column(index)].width = width
+            cell = WriteOnlyCell(sheet, value=header)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="224863")
+            styled_headers.append(cell)
+        sheet.append(styled_headers)
+        percentages = [i for i, h in enumerate(headers) if h in PERCENT or h == "error_check"]
+        last_row = 1
+        for last_row, row in enumerate(rows, 2):
+            for i in percentages:
+                cell = WriteOnlyCell(sheet, value=row[i])
+                cell.number_format = "0.00%"
+                row[i] = cell
+            sheet.append(row)
+        sheet.auto_filter.ref = f"A1:{column(len(headers))}{last_row}"
+    workbook.save(directory / "GA_results.xlsx")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="从本次实验的 CSV 重新生成工作簿")
+    parser.add_argument("directory", type=Path)
+    export(parser.parse_args().directory)
