@@ -6,6 +6,7 @@ import numpy as np
 
 import measurement_data
 from fit_models import create_model
+from formula_models import build_formula_ed_model
 
 PF_BASELINE = 6.0          # PF 定值，与 ED 空间模型的能量尺度无关。
 JITTER_PROBABILITY = 0.10  # 每轮先抽签，10% 概率同步影响 ED 和 PF。
@@ -58,6 +59,11 @@ class EDPFModel:
         self.ed_time = TimeJitter(seed=ed_seed, **(ed_time_parameters or {}))
         self.pf_time = PFTimeJitter(seed=pf_seed, **(pf_time_parameters or {}))
 
+    @classmethod
+    def from_formula(cls, mode, **sampling_parameters):
+        """例如 EDPFModel.from_formula("formula_plateau", seed=42)。"""
+        return cls(build_formula_ed_model(mode), **sampling_parameters)
+
     def measure(self, position):
         result = run_pipeline(position, self.position_half_width, self.position_rng,
                               self.spatial_model, ed_time_model=self.ed_time,
@@ -72,8 +78,10 @@ def _get_default_fitter(model_id):
 
 def run_pipeline(center, half_width=10.0, random_seed=42,
                  fitter=None, *, ed_time_model=None, pf_model=None):
-    """返回一发 ED/PF，复用传入的随机数流和时间模型。"""
+    """返回一发 ED/PF。fitter 可传空间模型或公式名，如 "formula_truncated_peak"。"""
     rng = np.random.default_rng(random_seed)
+    if isinstance(fitter, str):
+        fitter = build_formula_ed_model(fitter)
     spatial_model = _get_default_fitter(measurement_data.MODEL_ID) if fitter is None else fitter
     ed_time_model = TimeJitter(seed=rng.integers(0, 2**63)) if ed_time_model is None else ed_time_model
     pf_model = PFTimeJitter(seed=rng.integers(0, 2**63)) if pf_model is None else pf_model

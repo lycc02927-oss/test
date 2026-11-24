@@ -26,7 +26,7 @@ TARGET = "ed"  # 可选："ed" 最大化 ED；"ed_pf_ratio" 最大化 ED/PF。
 ED_SOURCE = "fitted"  # "fitted" 数据拟合；"formula" 数学公式。
 DATA_MODEL = 3  # 1=P3试验，2=LT仿真，3=LT精细仿真，4/5/6=三种高斯数据。
 FIT_METHOD = "rbf"  # rbf / manual_gpr / linear / polynomial / svm。
-FORMULA_MODEL = "formula_gaussian"  # 或 formula_offset_gaussian / formula_multi_gaussian。
+FORMULA_MODEL = "formula_gaussian"  # 平台区用 formula_plateau，截断峰用 formula_truncated_peak。
 RANDOM_SEED = 42
 BOUNDS = np.array([[-300.0, 300.0]] * 3)
 BO_PARAMETERS = dict(
@@ -498,9 +498,9 @@ def run_search(*, source=None, target=None, formula_model=None, data_model=None,
     fit_method = FIT_METHOD if fit_method is None else fit_method
     seed = RANDOM_SEED if seed is None else seed
     bounds = BOUNDS if bounds is None else bounds
-    set_ed_model(source, formula_model=formula_model, data_model=data_model,
-                 fit_method=fit_method, fit_parameters=fit_parameters,
-                 seed=seed, **(sampling_parameters or {}))
+    sensor = set_ed_model(source, formula_model=formula_model, data_model=data_model,
+                          fit_method=fit_method, fit_parameters=fit_parameters,
+                          seed=seed, **(sampling_parameters or {}))
     parameters = {**BO_PARAMETERS, **bo_parameters}
     history = bayesian_optimization(make_objective(target), bounds,
                                      random_seed=seed, **parameters)
@@ -514,10 +514,9 @@ def run_search(*, source=None, target=None, formula_model=None, data_model=None,
         print(f"Best {target} = {history['y'][best_idx]:.6f}")
         print(f"iters = {len(history['best_value']) - 1}")
     if show:
-        # 单峰公式的峰顶已知；拟合及多峰模型不虚设真实最优坐标。
         true_optimum = None
-        if source == 'formula' and len(FORMULA_CONFIGS[formula_model]['components']) == 1:
-            true_optimum = FORMULA_CONFIGS[formula_model]['components'][0]['center']
+        if source == 'formula':
+            true_optimum = sensor.spatial_model.single_peak_position(bounds)
         plot_optimization_results(history, true_optimum=true_optimum,
                                   dist_log=False, min_step=2.0)
     return history
