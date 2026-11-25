@@ -10,21 +10,11 @@ GA_SEED = 20261124
 
 
 @dataclass(frozen=True)
-class Plan:
-    population: int
-    generations: int
-    train: tuple
-    validation: tuple
-    spread_initial: bool = False
-
-
-# 各工况等权。同一阶段所有候选用相同种子，独立验证只比较冠军与基准。
-PLANS = {
-    "pilot": Plan(4, 3, (42,), (501, 502)),
-    "study": Plan(4, 4, (42, 43), tuple(range(501, 506))),
-    "balanced": Plan(6, 3, (42, 43), tuple(range(901, 906)), True),
-    "standard": Plan(12, 8, (42, 43, 44), tuple(range(1001, 1011)), True),
-}
+class Standard:
+    population: int = 20
+    generations: int = 15
+    train: tuple = (42, 43, 44)
+    validation: tuple = tuple(range(1001, 1011))
 
 
 def reference(model):

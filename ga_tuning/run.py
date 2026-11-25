@@ -1,47 +1,55 @@
-"""从仓库根目录执行 python -m ga_tuning.run --plan pilot。"""
+"""在仓库根目录执行 python -m ga_tuning.run。"""
 import argparse
 import os
 from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
-# 每个进程同时执行一个 BO。避免 8 个进程再各自启动一批 BLAS 线程。
 for key in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ[key] = "1"
 os.environ.setdefault("MPLBACKEND", "Agg")
 
-from .design import GA_SEED, MODELS, PLANS
-from .encoding import BASELINE, encode
+from .design import GA_SEED, MODELS, Standard
+from .encoding import decode
 from .genetic import evolve
-from .objective import rank_trials
-from .simulation import simulate
+from .objective import recipe_means
 from .report import Recorder
+from .simulation import default_recipe, simulate
+
+
+def run(settings, workers, directory):
+    default = default_recipe()
+    log = Recorder(directory, settings)
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        def evaluate(key, recipe, generation, stage="train"):
+            seeds = settings.train if stage == "train" else settings.validation
+            tasks = [(recipe, model, seed) for model in MODELS for seed in seeds]
+            trial_rows = []
+            number = log.register(key, recipe)
+            for trial, points in pool.map(simulate, tasks):
+                log.add(number, stage, trial, points)
+                trial_rows.append(trial)
+            score = recipe_means(trial_rows)
+            label = f"训练 第 {generation} 代" if stage == "train" else "独立验证"
+            print(f"[{label}] 个体 {number}  loss={score['loss']:.6f}  "
+                  f"基础 loss={score['base_loss']:.6f}  30轮失败率={score['patience_failed']:.1%}",
+                  flush=True)
+            return score
+
+        winner, history, members = evolve(settings, GA_SEED, default, evaluate)
+        evaluate("default", default, None, "validation")
+        evaluate(winner, decode(winner), None, "validation")
+    log.finish(winner, default, history, members)
+    print(f"GA 入选个体 {log.recipes[winner]}，曲线和工作簿已保存到 {directory}", flush=True)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="对带抖动 ED 模型搜索一组通用参数：" + "、".join(MODELS.values()))
-    parser.add_argument("--plan", choices=PLANS, default="pilot")
+    parser = argparse.ArgumentParser(description="standard GA：优化三种单峰 ED 工况")
     parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--out", type=Path, default=Path("ga_results"))
+    parser.add_argument("--out", type=Path, help="结果目录，默认以开始时间命名")
     args = parser.parse_args()
-    plan = PLANS[args.plan]
-    log = Recorder(args.out, args.plan, plan)
-
-    with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        def evaluate(bits_list, stage="train"):
-            seeds = plan.train if stage == "train" else plan.validation
-            tasks = [(bits, model, seed) for bits in bits_list for model in MODELS for seed in seeds]
-            grouped = {bits: [] for bits in bits_list}
-            for task, (trial, points) in zip(tasks, pool.map(simulate, tasks)):
-                bits, model, seed = task
-                log.add(bits, stage, trial, points)
-                grouped[bits].append(trial)
-            return {bits: rank_trials(rows) for bits, rows in grouped.items()}
-
-        winner, generations, members = evolve(plan, GA_SEED, evaluate)
-        baseline = encode(BASELINE)
-        evaluate(list(dict.fromkeys([winner, baseline])), "validation")
-    log.finish(winner, baseline, generations, members)
-    print(f"最佳训练配方 {log.recipes[winner]}；结果已保存到 {args.out}", flush=True)
+    directory = args.out or Path("ga_results") / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    run(Standard(), args.workers, directory)
 
 
 if __name__ == "__main__":

@@ -6,13 +6,22 @@ import numpy as np
 import batch_test
 import search
 from .design import BUDGET, ED_TOL, PATIENCE, reference
-from .encoding import decode
 from .objective import metrics
 
 
+def default_recipe():
+    """直接读取现行 BO 配置。两种重启次数的回退值与 batch_test 的实际调用一致。"""
+    params = search.BO_PARAMETERS
+    lo, hi = params["ls_bounds"]
+    return dict(sigma3_rel=params["sigma3_rel"], n_restarts=10,
+                n_restarts_ei=params.get("n_restarts_ei", 20),
+                xi_init=params["xi_init"], xi_final=params["xi_final"],
+                global_prob=params["global_prob"], ls_lo=lo, ls_hi=hi,
+                init_points=params["init_points"])
+
+
 def simulate(task):
-    bits, model, seed = task
-    recipe = decode(bits)
+    recipe, model, seed = task
     peak = reference(model)[3]
     initial = recipe["init_points"]
     case = dict(data_model=model, seed=seed, init_points=initial, target="ed")
@@ -32,7 +41,9 @@ def simulate(task):
         hist = batch_test.run_search_with_accuracy(
             case, {"reference_value": peak}, BUDGET - initial, PATIENCE, 100 * ED_TOL)
     span = float(np.ptp(search.BOUNDS, axis=1).max())
-    result = metrics(hist, peak, span)
+    # 用原 BO 的逐轮噪声和显著改善规则复核；不在此处叠加 ED 的 10% 门槛。
+    patience_round = batch_test.get_convergence_iteration(hist, PATIENCE, peak, tolerance_pct=np.inf)
+    result = metrics(hist, peak, span, patience_round)
     result.update(model=model, seed=seed)
     points = []
     best = -float("inf")

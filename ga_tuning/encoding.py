@@ -13,7 +13,6 @@ GRID = {
     "ls_hi": tuple(range(100, 301)),
     "init_points": tuple(range(10, 51)),
 }
-BASELINE = dict(zip(GRID, (0.01, 10, 10, 0.01, 0, 0, 40, 300, 30)))
 WIDTH = {key: (len(values) - 1).bit_length() for key, values in GRID.items()}
 ENDS = tuple(accumulate(WIDTH.values()))
 BITS = ENDS[-1]

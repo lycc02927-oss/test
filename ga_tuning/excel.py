@@ -11,7 +11,7 @@ TABS = {
 }
 TEXT = {"role", "stage", "phase", "stop", "chromosome", "parameter", "name", "plan", "distance_metric"}
 PERCENT = {"error", "mean_error", "error_limit", "success_rate", "worst_failure_rate",
-           "mean_failure_rate", "crossover", "bit_mutation"}
+           "mean_failure_rate", "failure_rate", "failure_weight", "crossover", "bit_mutation"}
 
 
 def parse(key, value):
@@ -61,6 +61,11 @@ def sheet_rows(directory, key):
                          f"+{sample}/{settings}$G$2*{settings}$K$2"
                          f"+{cost_distance}/{settings}$I$2*{settings}$L$2)"
                          f"/SUM({settings}$J$2:$L$2)")
+                if "patience_failed" in col:
+                    # 新批次 N2 是失败率权重；历史批次保留其原始评分公式。
+                    weight = f"{settings}$N$2"
+                    failed = col["patience_failed"] + str(n)
+                    score = f"=(1-{weight})*({score[1:]})+{weight}*{failed}"
                 values += [f"=ABS({ed}-{peak})/ABS({peak})", f"=MAX({','.join(axes)})", score]
             yield values
 
@@ -69,6 +74,7 @@ def export(directory):
     # 沿用仓库 batch_test 的 Excel 依赖。原始 CSV 始终保留。
     from openpyxl import Workbook
     from openpyxl.cell import WriteOnlyCell
+    from openpyxl.chart import LineChart, Reference
     from openpyxl.styles import Font, PatternFill
 
     # standard 会有较多轨迹行，流式写入使内存占用与行数无关。
@@ -96,6 +102,16 @@ def export(directory):
                 row[i] = cell
             sheet.append(row)
         sheet.auto_filter.ref = f"A1:{column(len(headers))}{last_row}"
+        if key == "generations" and "population_mean_loss" in headers:
+            chart = LineChart()
+            chart.title = "GA 训练 loss（第 0 代为默认 BO）"
+            chart.x_axis.title, chart.y_axis.title = "代数", "综合 loss"
+            for field in ("mean_loss", "population_mean_loss"):
+                idx = headers.index(field) + 1
+                chart.add_data(Reference(sheet, min_col=idx, min_row=1, max_row=last_row),
+                               titles_from_data=True)
+            chart.set_categories(Reference(sheet, min_col=1, min_row=2, max_row=last_row))
+            sheet.add_chart(chart, f"{column(len(headers) + 2)}2")
     workbook.save(directory / "GA_results.xlsx")
 
 
