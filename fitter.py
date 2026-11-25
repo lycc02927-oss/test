@@ -176,7 +176,7 @@ class EDPFModel:
         return result["ed"], result["pf"]
 
 
-@lru_cache(maxsize=6)
+@lru_cache(maxsize=len(measurement_data.MODEL_DATA))
 def _get_default_fitter(model_id):
     return EDFitter(model_id)
 

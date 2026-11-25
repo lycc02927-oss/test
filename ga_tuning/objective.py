@@ -38,7 +38,7 @@ def metrics(history, peak, span):
 
 
 class RecipeScore(NamedTuple):
-    # 先满足训练场次全部收敛的约束，然后最小化四工况平均 loss。
+    # 先满足训练场次全部收敛的约束，然后最小化各工况的等权平均 loss。
     has_failure: bool
     mean_loss: float
     worst_failure_rate: float

@@ -1,7 +1,7 @@
-"""上层批测：6 个 DATA_MODEL × 2 个目标 × 4 种初始点数 × 多个种子。
+"""上层批测：5 个 DATA_MODEL × 2 个目标 × 4 种初始点数 × 多个种子。
 
 上层控制迭代，复用 search.py 的模型、fit_gp() 和 get_next_sample()，不修改底层文件。
-默认每个模型 10 个种子，共 480 次；统一使用 fitted + rbf，最多 200 轮。
+默认每个模型 10 个种子，共 400 次。统一使用 fitted + rbf，最多 200 轮。
 同一模型的两种目标和四种初始点数复用同一组种子，便于配对比较。
 收敛必须同时满足：连续 stop_no_improve 轮无显著改进，且最佳值相对参考值偏差
 不超过 10%。偏差超标时继续迭代，达到预算仍未同时满足则不计作收敛。
@@ -57,7 +57,7 @@ from fitter import PF_BASELINE
 from measurement_data import MODEL_NAMES
 
 
-DATA_MODELS = (1, 2, 3, 4, 5, 6)
+DATA_MODELS = tuple(MODEL_NAMES)
 TARGETS = ('ed', 'ed_pf_ratio')
 INIT_POINTS = (10, 20, 30, 40)
 FIT_METHOD = 'rbf'
@@ -105,7 +105,7 @@ SUMMARY_FIELDS = [
 
 
 def make_plan(models=DATA_MODELS, repeats=REPEATS, base_seed=BASE_SEED):
-    """默认种子分组：模型1=42..51，模型2=52..61，依次至模型6=92..101。"""
+    """按原始模型编号分配种子，默认模型 3 使用 62..71，模型 6 使用 92..101。"""
     plan = []
     for model in models:
         for repeat in range(repeats):
@@ -404,7 +404,9 @@ def summarize(plan, records):
     groups = {}
     for case in plan:
         key = (case['data_model'], case['target'], case['init_points'])
-        group = groups.setdefault(key, {'planned': 0, 'rows': []})
+        # 历史计划自带工况名称，重建报告时仍可读取已下线的模型。
+        name = case.get('model_name') or MODEL_NAMES[case['data_model']]
+        group = groups.setdefault(key, {'model_name': name, 'planned': 0, 'rows': []})
         group['planned'] += 1
         if case['case_id'] in records:
             group['rows'].append(records[case['case_id']])
@@ -415,7 +417,7 @@ def summarize(plan, records):
         converged = [row for row in valid if row['status'] == 'converged']
         iterations = [int(row['convergence_iters']) for row in converged]
         summary.append(dict(
-            data_model=model, model_name=MODEL_NAMES[model], target=target,
+            data_model=model, model_name=group['model_name'], target=target,
             init_points=n_init, planned_runs=group['planned'], attempted_runs=len(rows),
             valid_runs=len(valid), converged_runs=len(converged),
             accuracy_passed_runs=sum(str(row.get('accuracy_passed', '')).lower() in ('true', '1')
@@ -716,7 +718,7 @@ def run_batch(*, models=DATA_MODELS, repeats=REPEATS, base_seed=BASE_SEED,
               value_tolerance_pct=VALUE_TOLERANCE_PCT):
     if repeats < 1 or max_iter < 1 or patience < 1:
         raise ValueError('repeats、max_iter、stop_no_improve 必须大于 0')
-    if not 0 <= base_seed <= 2**32 - len(DATA_MODELS) * repeats:
+    if not 0 <= base_seed <= 2**32 - max(DATA_MODELS) * repeats:
         raise ValueError('种子范围必须适用于 np.random.seed')
     if reference_grid < 2 or reference_starts < 1:
         raise ValueError('reference_grid 至少为 2，reference_starts 至少为 1')

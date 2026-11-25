@@ -1,18 +1,18 @@
-# 四种单峰 ED 工况的二进制遗传算法
+# 三种单峰 ED 工况的二进制遗传算法
 
-从四个带抖动的仿真模型中选出**同一组 BO 配方**。内层 BO 选下一次采样的三维位置。外层 GA 只选择 BO 的九个参数。设备接口和 UI 均不参与。
+在 LT 精细仿真（3）、中心高斯（4）和偏置高斯（5）上选择**同一组 BO 配方**。内层 BO 选下一次采样的三维位置。外层 GA 只选择 BO 的九个参数。设备接口和 UI 均不参与。
 
-[本次入选配方与独立验证结果](RESULTS.md) · [下载完整试验工作簿](results/GA_balanced.xlsx)
+[历史四工况的入选配方与独立验证结果](RESULTS.md) · [下载历史四工况工作簿](results/GA_balanced.xlsx)
 
 ## 运行
 
 在含有 `search.py`、`batch_test.py` 的仓库根目录执行。使用项目现有的 Python 环境，仿真依赖 NumPy、SciPy、Matplotlib，导出 Excel 依赖 openpyxl。本次使用 Python 3.12.14、NumPy 2.3.5、SciPy 1.17.0。新环境可以先运行 `python -m pip install numpy scipy matplotlib openpyxl`。
 
 ```bash
-python -m ga_tuning.run --plan pilot --workers 4 --out ga_pilot
+python -m ga_tuning.run --plan pilot --workers 4 --out ga_pilot_345
 ```
 
-打开 `ga_pilot/GA_results.xlsx`。先看“入选配方”里的 GA 与基准编号，再去“工况汇总”筛选 `stage=validation`，按工况比较。相同种子是配对试验。单次试验的编号可以关联到“采样轨迹”。
+打开 `ga_pilot_345/GA_results.xlsx`。先看“入选配方”里的 GA 与基准编号，再去“工况汇总”筛选 `stage=validation`，按工况比较。相同种子是配对试验。单次试验的编号可以关联到“采样轨迹”。
 
 | 方案 | 每代配方 | 代数（含初代） | 每个工况的训练种子 | 每个工况的独立验证种子 | 用途 |
 |---|---:|---:|---|---|---|
@@ -21,14 +21,14 @@ python -m ga_tuning.run --plan pilot --workers 4 --out ga_pilot
 | balanced | 6 | 3 | 42、43 | 901–905 | 初代覆盖 10–50 个初始点，再用新种子验证 |
 | standard | 12 | 8 | 42–44 | 1001–1010 | 扩大候选覆盖和重复次数 |
 
-复现这次对照或扩大搜索时使用新目录。
+三工况试验使用新目录，方便与历史四工况记录区分。
 
 ```bash
-python -m ga_tuning.run --plan balanced --workers 8 --out ga_balanced
+python -m ga_tuning.run --plan balanced --workers 8 --out ga_balanced_345
 python -m ga_tuning.run --plan standard --workers 8 --out ga_standard
 ```
 
-一套新配方跑“4 × 训练种子个数”场。精英跨代复用已得成绩，每个实际测试过的配方有唯一编号。验证仅运行训练冠军和基准，二者相同则合并。balanced 最多 16 套不同训练配方、128 场训练和 40 场验证。初代保留基准及其 10 初始点对照，另四套随机配方的初始点数分布在 10、23、37、50。后续交叉和变异可到达任意合法档位。每场设置相同的 90 个点总预算。BO 迭代预算等于 90 减去初始点数，原 BO 的 EI 衰减也按该迭代预算计算。多进程只影响速度。
+一套新配方跑“3 × 训练种子个数”场。精英跨代复用已得成绩，每个实际测试过的配方有唯一编号。验证仅运行训练冠军和基准，二者相同则合并。balanced 最多 16 套不同训练配方、96 场训练和 30 场验证。初代保留基准及其 10 初始点对照，另四套随机配方的初始点数分布在 10、23、37、50。后续交叉和变异可到达任意合法档位。每场设置相同的 90 个点总预算。BO 迭代预算等于 90 减去初始点数，原 BO 的 EI 衰减也按该迭代预算计算。多进程只影响速度。
 
 ## 文件与改动位置
 
@@ -37,7 +37,7 @@ python -m ga_tuning.run --plan standard --workers 8 --out ga_standard
 | 增减档位或更改基准 | `encoding.py` | `GRID` 定义实际可选值。`encode/decode` 在实数配方和二进制之间转换 |
 | 数据与试验次数 | `design.py` | `MODELS`、`PLANS`、`BUDGET`、`PATIENCE`、`ED_TOL` 和 `reference` |
 | 如何调用现有 BO | `simulation.py` | `simulate` 为一个工况、配方、种子调用一次已有仿真批测 |
-| 误差、路程与权重 | `objective.py` | `metrics` 评分，`rank_trials` 把四工况合成一个排名 |
+| 误差、路程与权重 | `objective.py` | `metrics` 评分，`rank_trials` 把三工况合成一个排名 |
 | 选择、交叉、变异 | `genetic.py` | `rates` 设置停滞后的强度，`child` 产生子代，`evolve` 管理精英和代际循环 |
 | 明细与汇总 | `report.py`、`excel.py` | 每场将 CSV 落盘。整批结束后汇总并写工作簿 |
 | 执行整批 | `run.py` | 建立种群、并行训练、锁定冠军、独立验证、导出 |
@@ -64,11 +64,10 @@ python -m ga_tuning.run --plan standard --workers 8 --out ga_standard
 
 ## 一场 BO 如何结束
 
-四个模型都用原始数据编号、RBF 拟合、单次带抖动 ED 观测。4、5 使用中心高斯、偏置高斯对应的数据表。参考值取 `MODEL_DATA[id]` 的最高 ED 数据点，与拟合连续面之间允许有插值差异。
+三个模型都用原始数据编号、RBF 拟合、单次带抖动 ED 观测。4、5 使用中心高斯、偏置高斯对应的数据表。参考值取 `MODEL_DATA[id]` 的最高 ED 数据点，与拟合连续面之间允许有插值差异。
 
 | 模型号 | 工况 | 设计 ED | 峰位 X | 峰位 Y | 峰位 Z |
 |---:|---|---:|---:|---:|---:|
-| 2 | LT 仿真 | 0.0266245 | 0 | 0 | 0 |
 | 3 | LT 精细仿真 | 0.0266245 | 0 | 0 | 0 |
 | 4 | 中心高斯 | 0.6011 | 0 | 0 | 0 |
 | 5 | 偏置高斯 | 0.6011 | 120 | -80 | 80 |
@@ -91,7 +90,7 @@ python -m ga_tuning.run --plan standard --workers 8 --out ga_standard
 单场得分 = (3 × 误差项 + 5 × 点数项 + 2 × 路程项) / 10
 ```
 
-三项都是成本，权重均为正。只增加路程会增加 loss，只减少偏差或点数会降低 loss。先对每个模型的重复试验取均值，再给四个模型相同权重。全训练场次都达到联合停止条件的配方中，选择平均 loss 最小的一套。若当代没有全达标配方，就按平均 loss 排序引导后续搜索，最终是否全达标可查 hits/runs。平均 loss 完全相同才用失败率打破平局。失败场次照常计入均值，计算耗时不计入 loss。
+三项都是成本，权重均为正。只增加路程会增加 loss，只减少偏差或点数会降低 loss。先对每个模型的重复试验取均值，再给三个模型相同权重。全训练场次都达到联合停止条件的配方中，选择平均 loss 最小的一套。若当代没有全达标配方，就按平均 loss 排序引导后续搜索，最终是否全达标可查 hits/runs。平均 loss 完全相同才用失败率打破平局。失败场次照常计入均值，计算耗时不计入 loss。
 
 使用排名轮盘赌选择双亲。若种群为 P，第 r 名的选择权重是 `(P-r+1)^a`。两个切点之间交换一段二进制，随后每位独立翻转。每代直接保留一名历史冠军。停滞指 GA 连续完整代没有刷新上述排序，它与 BO 内部的 30 轮是两套计数。
 
@@ -107,7 +106,7 @@ python -m ga_tuning.run --plan standard --workers 8 --out ga_standard
 
 ## Excel 怎么看
 
-- **入选配方、配方总评、工况汇总**：按 `role` 找到配方编号，在汇总中比较同一模型的 `hits/runs`、`mean_samples`、`mean_error`、`mean_sum_step_max` 和 `mean_loss`。均值覆盖该组的全部试验。“配方总评”列出全部训练候选的四工况排名，并单列验证排名。验证排名只作对照。
+- **入选配方、配方总评、工况汇总**：按 `role` 找到配方编号，在汇总中比较同一模型的 `hits/runs`、`mean_samples`、`mean_error`、`mean_sum_step_max` 和 `mean_loss`。均值覆盖该组的全部试验。“配方总评”列出全部训练候选的三工况排名，并单列验证排名。验证排名只作对照。
 - **逐次试验**：每行一场。`best_sample` 是包含 LHS 的最佳点序号，`bo` 是实际 BO 点数。最佳 ED、X、Y、Z 分列。`loss_check` 的距离项直接引用本行 `sum_step_max`。`error_check` 复算 ED 偏差，`max_axis_total_check` 只核对历史口径 `travel`。在“试验设置”修改权重可重算 `loss_check`。历史冠军和原始训练得分保留当时的值。
 - **采样轨迹**：每行一个点。用 `trial` 关联试验，用 `sample` 排序。`x/y/z` 是传给 fitter 的采样中心，包含抖动影响的单发读数记录在 `ed/pf`。`best_ed` 是截至该行的历史最高值，`xi/sigma` 仅在 BO 阶段有值。
 - **全部配方、代际进展、每代成员**：分别给出二进制和数值解码、每代的历史冠军和停滞强度、每代实际参与评比的配方和排名。
@@ -116,7 +115,7 @@ python -m ga_tuning.run --plan standard --workers 8 --out ga_standard
 保留同目录的 CSV 即可重新导出，无需再做 BO。
 
 ```bash
-python -m ga_tuning.excel ga_balanced
+python -m ga_tuning.excel ga_balanced_345
 ```
 
 旧批次 CSV 的 `settings.csv` 没有 `distance_metric` 字段。单独重新导出这些 CSV 会保留当时的历史打分口径；重跑 GA 会写入新口径 `sum_step_max`。

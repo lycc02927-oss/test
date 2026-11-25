@@ -18,12 +18,13 @@ from GPR import GaussianProcessRegressor
 from EI import expected_improvement
 from LHS import get_initial_points
 from fitter import EDFitter, EDPFModel, FORMULA_CONFIGS, build_formula_ed_model
+from measurement_data import MODEL_NAMES
 
 
 # -------------------- 修改这里切换模型和运行参数 --------------------
 TARGET = "ed"  # 可选："ed" 最大化 ED；"ed_pf_ratio" 最大化 ED/PF。
 ED_SOURCE = "fitted"  # "fitted" 数据拟合；"formula" 数学公式。
-DATA_MODEL = 3  # 1=P3试验，2=LT仿真，3=LT精细仿真，4/5/6=三种高斯数据。
+DATA_MODEL = 3  # 1=P3试验，3=LT精细仿真，4/5/6=中心/偏置/多峰高斯。
 FIT_METHOD = "rbf"  # rbf / manual_gpr / linear / polynomial / svm。
 FORMULA_MODEL = "formula_gaussian"  # 平台区用 formula_plateau，截断峰用 formula_truncated_peak。
 RANDOM_SEED = 42
@@ -528,7 +529,7 @@ if __name__ == '__main__':
     parser.add_argument('--source', choices=('fitted', 'formula'), default=ED_SOURCE)
     parser.add_argument('--target', choices=('ed', 'ed_pf_ratio'), default=TARGET)
     parser.add_argument('--formula-model', choices=tuple(FORMULA_CONFIGS), default=FORMULA_MODEL)
-    parser.add_argument('--data-model', type=int, choices=range(1, 7), default=DATA_MODEL)
+    parser.add_argument('--data-model', type=int, choices=tuple(MODEL_NAMES), default=DATA_MODEL)
     parser.add_argument('--fit-method', choices=('rbf', 'manual_gpr', 'linear', 'polynomial', 'svm'),
                         default=FIT_METHOD)
     parser.add_argument('--seed', type=int, default=RANDOM_SEED)

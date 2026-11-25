@@ -18,7 +18,7 @@ from .report import Recorder
 
 
 def main():
-    parser = argparse.ArgumentParser(description="对四种带抖动 ED 模型搜索一组通用参数")
+    parser = argparse.ArgumentParser(description="对带抖动 ED 模型搜索一组通用参数：" + "、".join(MODELS.values()))
     parser.add_argument("--plan", choices=PLANS, default="pilot")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--out", type=Path, default=Path("ga_results"))

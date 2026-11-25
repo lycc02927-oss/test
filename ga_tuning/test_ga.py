@@ -8,7 +8,7 @@ from unittest.mock import patch
 import numpy as np
 
 from . import simulation
-from .design import BUDGET, ED_TOL, GA_SEED, PATIENCE, PLANS
+from .design import BUDGET, ED_TOL, GA_SEED, MODELS, PATIENCE, PLANS
 from .encoding import BASELINE, BITS, GRID, decode, encode, repair
 from .genetic import evolve, rates
 from .excel import sheet_rows
@@ -56,10 +56,11 @@ class GATest(unittest.TestCase):
     def test_minimize_loss_within_convergence_constraint(self):
         def candidate(loss, successes):
             return rank_trials([dict(model=m, loss=loss, success=s)
-                                for m, s in zip((2, 3, 4, 5), successes)])
-        self.assertLess(candidate(0.2, [1, 1, 1, 1]), candidate(0.4, [1, 1, 1, 1]))
-        self.assertLess(candidate(0.4, [1, 1, 1, 1]), candidate(0.2, [0, 1, 1, 1]))
-        self.assertLess(candidate(0.2, [0, 0, 1, 1]), candidate(0.4, [0, 1, 1, 1]))
+                                for m, s in zip(MODELS, successes)])
+        self.assertEqual(tuple(MODELS), (3, 4, 5))
+        self.assertLess(candidate(0.2, [1, 1, 1]), candidate(0.4, [1, 1, 1]))
+        self.assertLess(candidate(0.4, [1, 1, 1]), candidate(0.2, [0, 1, 1]))
+        self.assertLess(candidate(0.2, [0, 0, 1]), candidate(0.4, [0, 1, 1]))
 
     def test_excel_scores_the_requested_distance(self):
         with TemporaryDirectory() as path:
