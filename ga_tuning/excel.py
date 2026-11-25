@@ -9,7 +9,7 @@ TABS = {
     "members": "每代成员", "models": "模型参考", "settings": "试验设置",
     "seeds": "随机种子", "grid": "编码档位",
 }
-TEXT = {"role", "stage", "phase", "stop", "chromosome", "parameter", "name", "plan"}
+TEXT = {"role", "stage", "phase", "stop", "chromosome", "parameter", "name", "plan", "distance_metric"}
 PERCENT = {"error", "mean_error", "error_limit", "success_rate", "worst_failure_rate",
            "mean_failure_rate", "crossover", "bit_mutation"}
 
@@ -33,11 +33,16 @@ def column(index):
 
 def sheet_rows(directory, key):
     """迭代产出表头和行；尽量避免在导出时多存一份完整采样轨迹。"""
+    if key == "trials":
+        with (directory / "settings.csv").open(encoding="utf-8-sig", newline="") as config:
+            # 老批次的 CSV 未声明计分距离，重导历史工作簿时保留其原始公式。
+            distance_metric = next(csv.DictReader(config)).get("distance_metric", "travel")
     with (directory / (key + ".csv")).open(encoding="utf-8-sig", newline="") as f:
         reader = csv.reader(f)
         headers = next(reader)
         if key == "trials":
-            yield headers + ["error_check", "travel_check", "loss_check"]
+            axis_label = "max_axis_total_check" if distance_metric == "sum_step_max" else "travel_check"
+            yield headers + ["error_check", axis_label, "loss_check"]
         else:
             yield headers
         col = {h: column(i) for i, h in enumerate(headers, 1)}
@@ -49,12 +54,12 @@ def sheet_rows(directory, key):
                 sample = col["samples"] + str(n)
                 axes = [col["travel_" + a] + str(n) for a in "xyz"]
                 error_check = column(len(headers) + 1) + str(n)
-                travel_check = column(len(headers) + 2) + str(n)
+                cost_distance = col[distance_metric] + str(n)
                 # 试验设置 F/G/I 为三个归一化分母，J/K/L 为权重。
                 settings = "'试验设置'!"
                 score = (f"=({error_check}/{settings}$F$2*{settings}$J$2"
                          f"+{sample}/{settings}$G$2*{settings}$K$2"
-                         f"+{travel_check}/{settings}$I$2*{settings}$L$2)"
+                         f"+{cost_distance}/{settings}$I$2*{settings}$L$2)"
                          f"/SUM({settings}$J$2:$L$2)")
                 values += [f"=ABS({ed}-{peak})/ABS({peak})", f"=MAX({','.join(axes)})", score]
             yield values

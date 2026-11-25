@@ -6,7 +6,7 @@ from statistics import mean
 
 from .design import BUDGET, ED_TOL, GA_SEED, MODELS, PATIENCE, reference
 from .encoding import GRID, WIDTH, decode
-from .objective import WEIGHTS
+from .objective import RecipeScore, WEIGHTS
 
 
 def csv_rows(path, rows, append=False):
@@ -31,13 +31,14 @@ def overall_summary(rows):
         result = dict(stage=stage, recipe=recipe, runs=sum(int(r["runs"]) for r in models),
                       hits=sum(int(r["hits"]) for r in models),
                       worst_failure_rate=1 - min(rates), mean_failure_rate=1 - mean(rates))
-        for metric in ("mean_error", "mean_samples", "mean_bo", "mean_travel", "mean_loss"):
+        for metric in ("mean_error", "mean_samples", "mean_bo", "mean_travel", "mean_sum_step_max", "mean_loss"):
             result[metric] = mean(float(r[metric]) for r in models)
         results.append(result)
     ranked = []
     for stage in ("train", "validation"):
         subset = [r for r in results if r["stage"] == stage]
-        subset.sort(key=lambda r: (r["worst_failure_rate"], r["mean_failure_rate"], r["mean_loss"]))
+        subset.sort(key=lambda r: RecipeScore(r["hits"] < r["runs"], r["mean_loss"],
+                                              r["worst_failure_rate"], r["mean_failure_rate"]))
         for rank, result in enumerate(subset, 1):
             ranked.append(dict(rank=rank, **result))
     return ranked
@@ -56,7 +57,7 @@ class Recorder:
         settings = dict(plan=name, population=plan.population, generations=plan.generations,
                         ga_seed=GA_SEED, patience=PATIENCE, error_limit=ED_TOL, sample_cap=BUDGET,
                         axis_span=span, distance_cap=BUDGET * span, weight_error=WEIGHTS[0],
-                        weight_samples=WEIGHTS[1], weight_travel=WEIGHTS[2])
+                        weight_samples=WEIGHTS[1], weight_travel=WEIGHTS[2], distance_metric="sum_step_max")
         self.write("settings", [settings])
         self.write("seeds", [dict(stage=stage, seed=s) for stage, seeds in
                              (("train", plan.train), ("validation", plan.validation)) for s in seeds])
@@ -94,7 +95,7 @@ class Recorder:
             hits = sum(t["success"] for t in trials)
             row = dict(stage=stage, recipe=recipe, model=model, runs=len(trials),
                        hits=hits, success_rate=hits / len(trials))
-            for metric in ("best_ed", "error", "samples", "bo", "travel", "loss"):
+            for metric in ("best_ed", "error", "samples", "bo", "travel", "sum_step_max", "loss"):
                 row["mean_" + metric] = mean(t[metric] for t in trials)
             summary.append(row)
         self.write("summary", summary)

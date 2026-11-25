@@ -59,14 +59,14 @@ def evolve(plan, seed, evaluate):
         else:
             stale += 1
         power, crossover, mutation = rates(stale)
-        failures, average_failures, loss = scores[champion]
+        score = scores[champion]
         history.append(dict(generation=generation, champion=champion, stale=stale,
                             selection_power=power, crossover=crossover, bit_mutation=mutation,
-                            new_recipes=len(fresh), worst_failure_rate=failures,
-                            mean_failure_rate=average_failures, mean_loss=loss))
+                            new_recipes=len(fresh), worst_failure_rate=score.worst_failure_rate,
+                            mean_failure_rate=score.mean_failure_rate, mean_loss=score.mean_loss))
         for rank, bits in enumerate(ranked, 1):
             members.append(dict(generation=generation, rank=rank, chromosome=bits))
-        print(f"第 {generation} 代完成，最弱工况失败率 {failures:.1%}，平均分 {loss:.4f}", flush=True)
+        print(f"第 {generation} 代完成，最弱工况失败率 {score.worst_failure_rate:.1%}，平均分 {score.mean_loss:.4f}", flush=True)
         if generation == plan.generations:
             break
         # 精英原样保留。其余名额从父代产生，同代去重避免重复测量。
