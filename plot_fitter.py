@@ -9,7 +9,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import Normalize
-from matplotlib.font_manager import FontProperties
 from scipy.optimize import minimize
 
 from fitter import EDFitter, EDPFModel, build_formula_ed_model
@@ -66,28 +65,6 @@ def _xyz_text(xyz):
     return "(" + ", ".join(f"{v:.2f}" for v in xyz) + ")"
 
 
-def _draw_heat_slices(ax, planes, peak, cmap, norm):
-    """把同一组二维 ED 数据放回三维空间，每张热力面穿过静态峰位。"""
-    for i, j, fixed, a, b, ed in planes:
-        xyz = [None] * 3
-        xyz[i], xyz[j] = np.meshgrid(a, b)
-        xyz[fixed] = np.full_like(xyz[i], peak[fixed])
-        # 每个网格面的颜色取四角 ED 的均值。关闭光照，避免朝向改变颜色含义。
-        face_ed = (ed[:-1, :-1] + ed[1:, :-1] + ed[:-1, 1:] + ed[1:, 1:]) / 4
-        colors = cmap(norm(face_ed))
-
-        # 沿交线拆面，让 Matplotlib 旋转视角时能按前后顺序绘制各块。
-        col = np.searchsorted(a, peak[i])
-        row = np.searchsorted(b, peak[j])
-        for y0, y1 in ((0, row), (row, len(b) - 1)):
-            for x0, x1 in ((0, col), (col, len(a) - 1)):
-                if x1 > x0 and y1 > y0:
-                    patch = tuple(coord[y0:y1 + 1, x0:x1 + 1] for coord in xyz)
-                    ax.plot_surface(*patch, facecolors=colors[y0:y1, x0:x1],
-                                    rstride=1, cstride=1, shade=False,
-                                    linewidth=0, antialiased=False)
-
-
 def plot_fitter_model(data_model=3, fit_method="rbf", *, formula_model=None, peaks=None,
                       fit_parameters=None, bounds=((-300, 300),) * 3, setpoint=None,
                       shots=100, seed=42, position_half_width=10.0,
@@ -99,7 +76,6 @@ def plot_fitter_model(data_model=3, fit_method="rbf", *, formula_model=None, pea
     时使用公式模型及其 peaks。data 包含每一发的真实取样坐标、位置抖动后的空间 ED、
     最终单发 ED、PF，以及静态数值极值 peak_ed/peak_xyz 和 min_ed/min_xyz、
     观测最高发次（从 1 开始）。同值有多处时标记其中一个位置。
-    三维热力图显示过峰位的 XY、XZ、YZ 三张切面，颜色与上方切片共用静态 ED 色标。
     """
     if shots < 1:
         raise ValueError("shots 至少为 1")
@@ -156,12 +132,9 @@ def plot_fitter_model(data_model=3, fit_method="rbf", *, formula_model=None, pea
         planes.append((i, j, fixed, a, b, z))
     norm = Normalize(min(low_ed, *(p[-1].min() for p in planes)),
                      max(peak_ed, *(p[-1].max() for p in planes)))
-    # 将实际字体名存进图中，调用方旋转三维图或再次保存时仍能显示中文。
-    font = FontProperties(family=["Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans CJK JP",
-                                  "SimHei", "PingFang SC", "DejaVu Sans"]).get_name()
-    style = {"font.family": font, "axes.unicode_minus": False}
+    style = {"font.sans-serif": ["Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans CJK JP",
+                                 "SimHei", "PingFang SC", "DejaVu Sans"], "axes.unicode_minus": False}
     with plt.rc_context(style):
-        cmap = plt.get_cmap("plasma")
         fig = plt.figure(figsize=(13.4, 9.8), layout="constrained")
         rows = fig.add_gridspec(2, 1, height_ratios=[.98, 1.34])
         top = rows[0].subgridspec(1, 4, width_ratios=[1, 1, 1, .046])
@@ -169,20 +142,24 @@ def plot_fitter_model(data_model=3, fit_method="rbf", *, formula_model=None, pea
         fig.suptitle(f"{title}   |   ED 空间分布与单发抖动", fontsize=19, fontweight="bold")
         for col, (i, j, fixed, a, b, z) in enumerate(planes):
             ax = fig.add_subplot(top[0, col])
-            im = ax.pcolormesh(a, b, z, shading="auto", cmap=cmap, norm=norm)
+            im = ax.pcolormesh(a, b, z, shading="auto", cmap="viridis", norm=norm)
             ax.scatter(peak[i], peak[j], marker="*", s=155, c="#ffcd55", edgecolors="#24292d")
             ax.set(xlim=bounds[i], ylim=bounds[j], aspect="equal",
                    xlabel=f"{'XYZ'[i]} (µm)", ylabel=f"{'XYZ'[j]} (µm)",
                    title=f"{'XYZ'[i]}{'XYZ'[j]} 切片  ·  {'XYZ'[fixed]} = {peak[fixed]:.2f} µm")
         fig.colorbar(im, cax=fig.add_subplot(top[0, 3]), label="静态 ED")
 
-        ax3d = fig.add_subplot(bottom[0, 0], projection="3d")
-        _draw_heat_slices(ax3d, planes, peak, cmap, norm)
-        # 用顶层标记标出整个搜索范围的极值，即使极小点在切面后面也能看到。
-        ax3d.plot(*low, marker="v", ms=10, color="#66ccff", mec="#13283f", zorder=100)
-        ax3d.plot(*peak, marker="*", ms=15, color="#ffcd55", mec="#24292d", zorder=101)
+        ax3d = fig.add_subplot(bottom[0, 0], projection="3d", computed_zorder=False)
+        # 三维图只抽稀显示规则网格；极值仍使用全部候选点和局部精修结果。
+        volume_ed = predictions[len(anchors):].reshape(grid.shape[:-1])
+        visible = grid[::3, ::3, ::3].reshape(-1, 3)
+        colors = volume_ed[::3, ::3, ::3].ravel()
+        ax3d.scatter(*visible.T, c=colors, cmap="viridis", norm=norm, alpha=.48,
+                     s=12, linewidths=0, depthshade=False, zorder=1)
+        ax3d.scatter(*low, marker="v", s=110, c="#66ccff", edgecolors="#13283f", zorder=3)
+        ax3d.scatter(*peak, marker="*", s=175, c="#ffcd55", edgecolors="#24292d", zorder=4)
         ax3d.set(xlim=bounds[0], ylim=bounds[1], zlim=bounds[2],
-                 xlabel="X (µm)", ylabel="Y (µm)", zlabel="Z (µm)", title="三维 ED 热力图 · 过峰正交切片")
+                 xlabel="X (µm)", ylabel="Y (µm)", zlabel="Z (µm)", title="三维静态 ED 分布")
         ax3d.set_box_aspect(np.ptp(bounds, axis=1), zoom=.9)
         for axis, (start, stop) in zip((ax3d.xaxis, ax3d.yaxis, ax3d.zaxis), bounds):
             axis.set_ticks(np.linspace(start, stop, 3))
