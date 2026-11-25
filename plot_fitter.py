@@ -1,4 +1,4 @@
-"""画 ED 模型切片和同一设定位置的单发抖动。直接运行可预览模型 3 的 RBF 图。
+"""画 ED 模型的三维分布、过峰切片及固定设定位置的单发抖动。
 
 from plot_fitter import plot_fitter_model
 fig, data = plot_fitter_model(data_model=3, fit_method="rbf", save_path="lt3.png")
@@ -23,33 +23,30 @@ def _values(model, xyz):
     return np.array([model.predict(p) for p in xyz])
 
 
-def _find_peak(model, bounds, anchors):
-    """在三维边界内找静态峰：原始点/公式中心、规则网格以及高值区的局部精修。"""
+def _refine_extreme(model, bounds, xyz, ed, sign):
+    """以分散的高值或低值点为起点做有界局部精修。sign=-1 找最大值，+1 找最小值。"""
     lo, hi = bounds.T
-    axis = [np.linspace(a, b, 19) for a, b in bounds]
-    grid = np.stack(np.meshgrid(*axis, indexing="ij"), axis=-1).reshape(-1, 3)
-    xyz = np.vstack((np.clip(anchors, lo, hi), grid))
-    ed = _values(model, xyz)
-    best = int(np.argmax(ed))
-    peak, value = xyz[best].copy(), float(ed[best])
+    order = np.argsort(sign * ed, kind="stable")
+    location = xyz[order[0]].copy()
+    value = float(ed[order[0]])
     scale = max(float(np.ptp(ed)), 1e-12)
 
-    # 在单位立方体内精修；起点稍微分散，避免多峰情况下总在同一小片区域启动。
+    # 在单位立方体内精修，分散起点以覆盖多个高值区或低值区。
     starts = []
-    for index in np.argsort(-ed, kind="stable"):
+    for index in order:
         u = (xyz[index] - lo) / (hi - lo)
         if all(np.linalg.norm(u - old) > 0.12 for old in starts):
             starts.append(u)
         if len(starts) == 8:
             break
     for u in starts:
-        fit = minimize(lambda t: -model.predict(lo + t * (hi - lo)) / scale, u,
+        fit = minimize(lambda t: sign * model.predict(lo + t * (hi - lo)) / scale, u,
                        method="L-BFGS-B", bounds=[(0, 1)] * 3)
         point = lo + np.clip(fit.x, 0, 1) * (hi - lo)
         prediction = model.predict(point)
-        if prediction > value:
-            peak, value = point, float(prediction)
-    return peak, value
+        if sign * prediction < sign * value:
+            location, value = point, float(prediction)
+    return location, value
 
 
 class _ShotProbe:
@@ -77,7 +74,8 @@ def plot_fitter_model(data_model=3, fit_method="rbf", *, formula_model=None, pea
 
     数据模式从 MODEL_DATA 读取，fit_parameters 与 EDFitter 一致。传 formula_model
     时使用公式模型及其 peaks。data 包含每一发的真实取样坐标、位置抖动后的空间 ED、
-    最终单发 ED、PF，以及峰位、峰值和观测最高发次（从 1 开始）。
+    最终单发 ED、PF，以及静态数值极值 peak_ed/peak_xyz 和 min_ed/min_xyz、
+    观测最高发次（从 1 开始）。同值有多处时标记其中一个位置。
     """
     if shots < 1:
         raise ValueError("shots 至少为 1")
@@ -95,7 +93,13 @@ def plot_fitter_model(data_model=3, fit_method="rbf", *, formula_model=None, pea
         title = formula_model
         method = "生成方法  解析公式"
 
-    peak, peak_ed = _find_peak(model, bounds, anchors)
+    # 两个极值共用同一次三维网格预测；包含边界、八个角及模型原始点。
+    axes = [np.linspace(a, b, 19) for a, b in bounds]
+    grid = np.stack(np.meshgrid(*axes, indexing="ij"), axis=-1)
+    candidates = np.vstack((np.clip(anchors, *bounds.T), grid.reshape(-1, 3)))
+    predictions = _values(model, candidates)
+    peak, peak_ed = _refine_extreme(model, bounds, candidates, predictions, -1)
+    low, low_ed = _refine_extreme(model, bounds, candidates, predictions, 1)
     center = peak.copy() if setpoint is None else np.asarray(setpoint, dtype=float)
     center_ed = model.predict(center)
     probe = _ShotProbe(model)
@@ -111,7 +115,8 @@ def plot_fitter_model(data_model=3, fit_method="rbf", *, formula_model=None, pea
     positions = np.asarray(positions)
     spatial_ed, measured_ed = np.asarray(spatial_ed), np.asarray(measured_ed)
     best = int(np.argmax(measured_ed))
-    data = dict(peak_xyz=peak, peak_ed=peak_ed, setpoint=center, setpoint_ed=center_ed,
+    data = dict(peak_xyz=peak, peak_ed=peak_ed, min_xyz=low, min_ed=low_ed,
+                setpoint=center, setpoint_ed=center_ed,
                 sample_xyz=positions, spatial_ed=spatial_ed, ed=measured_ed, pf=np.array(pf),
                 best_shot=best + 1, best_shot_xyz=positions[best], best_shot_ed=measured_ed[best])
 
@@ -125,22 +130,53 @@ def plot_fitter_model(data_model=3, fit_method="rbf", *, formula_model=None, pea
         xyz[:, i], xyz[:, j] = xx.ravel(), yy.ravel()
         z = _values(model, xyz).reshape(xx.shape)
         planes.append((i, j, fixed, a, b, z))
-    norm = Normalize(min(p[-1].min() for p in planes), max(p[-1].max() for p in planes))
+    norm = Normalize(min(low_ed, *(p[-1].min() for p in planes)),
+                     max(peak_ed, *(p[-1].max() for p in planes)))
     style = {"font.sans-serif": ["Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans CJK JP",
                                  "SimHei", "PingFang SC", "DejaVu Sans"], "axes.unicode_minus": False}
     with plt.rc_context(style):
-        fig = plt.figure(figsize=(13.4, 8.0), layout="constrained")
-        gs = fig.add_gridspec(2, 4, width_ratios=[1, 1, 1, .046], height_ratios=[1.3, .86])
+        fig = plt.figure(figsize=(13.4, 9.8), layout="constrained")
+        rows = fig.add_gridspec(2, 1, height_ratios=[.98, 1.34])
+        top = rows[0].subgridspec(1, 4, width_ratios=[1, 1, 1, .046])
+        bottom = rows[1].subgridspec(2, 2, width_ratios=[.92, 1.18], height_ratios=[3.1, .85])
         fig.suptitle(f"{title}   |   ED 空间分布与单发抖动", fontsize=19, fontweight="bold")
         for col, (i, j, fixed, a, b, z) in enumerate(planes):
-            ax = fig.add_subplot(gs[0, col])
+            ax = fig.add_subplot(top[0, col])
             im = ax.pcolormesh(a, b, z, shading="auto", cmap="viridis", norm=norm)
             ax.scatter(peak[i], peak[j], marker="*", s=155, c="#ffcd55", edgecolors="#24292d")
             ax.set(xlim=bounds[i], ylim=bounds[j], aspect="equal",
                    xlabel=f"{'XYZ'[i]} (µm)", ylabel=f"{'XYZ'[j]} (µm)",
                    title=f"{'XYZ'[i]}{'XYZ'[j]} 切片  ·  {'XYZ'[fixed]} = {peak[fixed]:.2f} µm")
-        fig.colorbar(im, cax=fig.add_subplot(gs[0, 3]), label="静态 ED")
-        ax = fig.add_subplot(gs[1, :2])
+        fig.colorbar(im, cax=fig.add_subplot(top[0, 3]), label="静态 ED")
+
+        ax3d = fig.add_subplot(bottom[0, 0], projection="3d", computed_zorder=False)
+        # 三维图只抽稀显示规则网格；极值仍使用全部候选点和局部精修结果。
+        volume_ed = predictions[len(anchors):].reshape(grid.shape[:-1])
+        visible = grid[::3, ::3, ::3].reshape(-1, 3)
+        colors = volume_ed[::3, ::3, ::3].ravel()
+        ax3d.scatter(*visible.T, c=colors, cmap="viridis", norm=norm, alpha=.48,
+                     s=12, linewidths=0, depthshade=False, zorder=1)
+        ax3d.scatter(*low, marker="v", s=110, c="#66ccff", edgecolors="#13283f", zorder=3)
+        ax3d.scatter(*peak, marker="*", s=175, c="#ffcd55", edgecolors="#24292d", zorder=4)
+        ax3d.set(xlim=bounds[0], ylim=bounds[1], zlim=bounds[2],
+                 xlabel="X (µm)", ylabel="Y (µm)", zlabel="Z (µm)", title="三维静态 ED 分布")
+        ax3d.set_box_aspect(np.ptp(bounds, axis=1), zoom=.9)
+        for axis, (start, stop) in zip((ax3d.xaxis, ax3d.yaxis, ax3d.zaxis), bounds):
+            axis.set_ticks(np.linspace(start, stop, 3))
+            axis.set_tick_params(labelsize=8)
+        ax3d.view_init(elev=23, azim=-53)
+        extrema = fig.add_subplot(bottom[1, 0])
+        extrema.axis("off")
+        for y, marker, color, label, val, point in [
+            (.74, "*", "#ffcd55", "最大", peak_ed, peak),
+            (.32, "v", "#66ccff", "最小", low_ed, low),
+        ]:
+            extrema.scatter(.04, y, marker=marker, s=105, c=color, edgecolors="#24292d",
+                            transform=extrema.transAxes)
+            extrema.text(.09, y, f"{label} ED  {val:.7g}     XYZ  {_xyz_text(point)} µm",
+                         va="center", transform=extrema.transAxes)
+
+        ax = fig.add_subplot(bottom[0, 1])
         n = np.arange(1, shots + 1)
         ax.axhline(center_ed, ls="--", lw=1.2, color="#56626d", label="设定点静态 ED")
         ax.vlines(n, spatial_ed, measured_ed, color="#ac65a0", lw=1)
@@ -150,17 +186,13 @@ def plot_fitter_model(data_model=3, fit_method="rbf", *, formula_model=None, pea
                    s=48, zorder=4, label="本组最高单发")
         ax.set(title="固定设定点重复量测", xlabel="发次", ylabel="ED")
         ax.grid(axis="y", alpha=.2)
-        ax.legend(loc="upper center", bbox_to_anchor=(.5, -.25), ncol=2, fontsize=9)
-        info = fig.add_subplot(gs[1, 2:])
+        ax.legend(loc="best", ncol=2, fontsize=8.5)
+        info = fig.add_subplot(bottom[1, 1])
         info.axis("off")
-        block = (f"{method}  ·  {shots} 发  ·  seed {seed}\n"
-                 f"★  静态数值峰   ED = {peak_ed:.7g}\n"
-                 f"     XYZ  {_xyz_text(peak)} µm\n"
-                 f"◆  最高单发 #{best + 1}   ED = {measured_ed[best]:.7g}\n"
-                 f"     取样 XYZ  {_xyz_text(positions[best])} µm\n"
-                 f"设定 XYZ  {_xyz_text(center)} µm\n"
-                 f"各轴位置抖动 ±{position_half_width:g} µm    单发标准差 {np.std(measured_ed):.3g}")
-        info.text(.01, .98, block, va="top", linespacing=1.65, fontsize=10.5, color="#23374a")
+        block = (f"{method}  ·  {shots} 发  ·  seed {seed}  ·  单发标准差 {np.std(measured_ed):.3g}\n"
+                 f"设定 XYZ  {_xyz_text(center)} µm    各轴抖动 ±{position_half_width:g} µm\n"
+                 f"◆  最高单发 #{best + 1}   ED {measured_ed[best]:.7g}    取样 XYZ {_xyz_text(positions[best])} µm")
+        info.text(.01, .90, block, va="top", linespacing=1.65, fontsize=10, color="#23374a")
         if save_path:
             path = Path(save_path)
             path.parent.mkdir(parents=True, exist_ok=True)
