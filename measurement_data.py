@@ -2,7 +2,7 @@
 import numpy as np
 
 MODEL_ID = 1
-MODEL_NAMES = {1: 'P3 试验', 3: 'LT 精细仿真', 4: '中心高斯', 5: '偏置高斯', 6: '多峰高斯'}
+MODEL_NAMES = {1: 'P3 试验', 2: 'LT 整机仿真', 3: '中心高斯', 4: '偏置高斯', 5: '多峰高斯'}
 
 # P3 试验: [X, Y, Z, ED]
 MEASUREMENTS_1 = np.array([
@@ -73,8 +73,8 @@ MEASUREMENTS_1 = np.array([
     [-31.68, -16.92, 66.81, 0.6011],
 ], dtype=float)
 
-# LT 精细仿真: [X, Y, Z, ED]
-MEASUREMENTS_3 = np.array([
+# LT 整机仿真: [X, Y, Z, ED]
+MEASUREMENTS_2 = np.array([
     [-100.0, -100.0, -100.0, 0.0260205],
     [-100.0, -100.0, -200.0, 0.02575875],
     [-100.0, -100.0, -300.0, 0.02397225],
@@ -421,7 +421,7 @@ MEASUREMENTS_3 = np.array([
 ], dtype=float)
 
 # 中心高斯: [X, Y, Z, ED]
-MEASUREMENTS_4 = np.array([
+MEASUREMENTS_3 = np.array([
     [-300.0, -300.0, -300.0, 0.2638],
     [-300.0, -300.0, -200.0, 0.263805171066266],
     [-300.0, -300.0, -100.0, 0.26382478513170066],
@@ -771,7 +771,7 @@ MEASUREMENTS_4 = np.array([
 ], dtype=float)
 
 # 偏置高斯: [X, Y, Z, ED]
-MEASUREMENTS_5 = np.array([
+MEASUREMENTS_4 = np.array([
     [-300.0, -300.0, -300.0, 0.2638000000425824],
     [-300.0, -300.0, -200.0, 0.2638000025102655],
     [-300.0, -300.0, -100.0, 0.26380004294573905],
@@ -1121,7 +1121,7 @@ MEASUREMENTS_5 = np.array([
 ], dtype=float)
 
 # 多峰高斯: [X, Y, Z, ED]
-MEASUREMENTS_6 = np.array([
+MEASUREMENTS_5 = np.array([
     [-300.0, -300.0, -300.0, 0.26380751707634287],
     [-300.0, -300.0, -200.0, 0.26397497858321717],
     [-300.0, -300.0, -100.0, 0.2644099573323282],
@@ -1472,10 +1472,10 @@ MEASUREMENTS_6 = np.array([
 
 MODEL_DATA = {
     1: MEASUREMENTS_1,
+    2: MEASUREMENTS_2,
     3: MEASUREMENTS_3,
     4: MEASUREMENTS_4,
     5: MEASUREMENTS_5,
-    6: MEASUREMENTS_6,
 }
 MEASUREMENTS = MODEL_DATA[MODEL_ID]
 

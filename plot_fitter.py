@@ -1,7 +1,7 @@
 """画 ED 模型的三维分布、过峰切片及固定设定位置的单发抖动。
 
 from plot_fitter import plot_fitter_model
-fig, data = plot_fitter_model(data_model=3, fit_method="rbf", save_path="lt3.png")
+fig, data = plot_fitter_model(data_model=2, fit_method="rbf", save_path="lt_system.png")
 fig, data = plot_fitter_model(formula_model="formula_truncated_peak", setpoint=(130, 0, 0))
 """
 from pathlib import Path
@@ -65,7 +65,7 @@ def _xyz_text(xyz):
     return "(" + ", ".join(f"{v:.2f}" for v in xyz) + ")"
 
 
-def plot_fitter_model(data_model=3, fit_method="rbf", *, formula_model=None, peaks=None,
+def plot_fitter_model(data_model=2, fit_method="rbf", *, formula_model=None, peaks=None,
                       fit_parameters=None, bounds=((-300, 300),) * 3, setpoint=None,
                       shots=100, seed=42, position_half_width=10.0,
                       ed_time_parameters=None, pf_time_parameters=None,

@@ -57,7 +57,7 @@ class GATest(unittest.TestCase):
         def candidate(loss, successes):
             return rank_trials([dict(model=m, loss=loss, success=s)
                                 for m, s in zip(MODELS, successes)])
-        self.assertEqual(tuple(MODELS), (3, 4, 5))
+        self.assertEqual(tuple(MODELS), (2, 3, 4))
         self.assertLess(candidate(0.2, [1, 1, 1]), candidate(0.4, [1, 1, 1]))
         self.assertLess(candidate(0.4, [1, 1, 1]), candidate(0.2, [0, 1, 1]))
         self.assertLess(candidate(0.2, [0, 0, 1]), candidate(0.4, [0, 1, 1]))
@@ -96,7 +96,7 @@ class GATest(unittest.TestCase):
         original_params = simulation.search.BO_PARAMETERS.copy()
 
         def observe(case, reference, rounds, patience, percent):
-            self.assertEqual((case["data_model"], case["target"]), (3, "ed"))
+            self.assertEqual((case["data_model"], case["target"]), (2, "ed"))
             self.assertEqual((rounds, patience, percent), (BUDGET - 30, PATIENCE, 100 * ED_TOL))
             self.assertEqual(simulation.search.BO_PARAMETERS["n_restarts_ei"], 40)
             simulation.search.fit_gp(n_restarts=10)
@@ -106,7 +106,7 @@ class GATest(unittest.TestCase):
         with patch.object(simulation.search, "fit_gp") as gp:
             with patch.object(simulation.batch_test, "run_search_with_accuracy", observe):
                 with self.assertRaises(StopIteration):
-                    simulation.simulate((encode(recipe), 3, 42))
+                    simulation.simulate((encode(recipe), 2, 42))
             gp.assert_called_once_with(n_restarts=70)
             self.assertIs(simulation.search.fit_gp, gp)
         self.assertEqual(simulation.search.BO_PARAMETERS, original_params)

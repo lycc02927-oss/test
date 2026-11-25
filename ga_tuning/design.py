@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from measurement_data import MODEL_DATA, MODEL_NAMES
 
-MODELS = {i: MODEL_NAMES[i] for i in (3, 4, 5)}
+MODELS = {i: MODEL_NAMES[i] for i in (2, 3, 4)}
 PATIENCE = 30
 ED_TOL = 0.10
 BUDGET = 90  # 包含初始采样。每个 recipe 用同样的总预算。

@@ -27,6 +27,7 @@ comparison.csv 新增 total_distance_x_mean/y_mean/z_mean 三列，每列按 ini
 已有结果可用 --report-only 从 histories/*.npz 补算，无需重新寻优。
 默认参考值是无抖动 RBF 模型的多起点数值参考最优，不保证是全局解析最优。
 --reference-file 可提供已知理论值，CSV 列为 data_model,target,value,x,y,z，
+参考表使用当前编号（1–5）。沿用旧表时，删掉旧 2，把旧 3–6 改为 2–5。
 每个模型分别填写 ed 和 ed_pf_ratio 两行。CSV 可直接用 Excel 打开。
 批测后自动生成 batch_results.xlsx、convergence_ed.png、convergence_ed_pf_ratio.png。
 Excel 导出/读取需要 openpyxl：python3 -m pip install openpyxl。
@@ -105,7 +106,7 @@ SUMMARY_FIELDS = [
 
 
 def make_plan(models=DATA_MODELS, repeats=REPEATS, base_seed=BASE_SEED):
-    """按原始模型编号分配种子，默认模型 3 使用 62..71，模型 6 使用 92..101。"""
+    """按模型编号分配种子，默认模型 2 使用 52..61，模型 5 使用 82..91。"""
     plan = []
     for model in models:
         for repeat in range(repeats):

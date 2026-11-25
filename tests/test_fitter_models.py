@@ -8,13 +8,13 @@ from measurement_data import MODEL_DATA, MODEL_NAMES, set_model
 
 class TestEDModels(unittest.TestCase):
     def test_fitted_model_ids(self):
-        self.assertEqual(set(MODEL_DATA), {1, 3, 4, 5, 6})
+        self.assertEqual(set(MODEL_DATA), {1, 2, 3, 4, 5})
         self.assertEqual(MODEL_DATA.keys(), MODEL_NAMES.keys())
-        self.assertEqual(MODEL_NAMES[3], "LT 精细仿真")
+        self.assertEqual(MODEL_NAMES[2], "LT 整机仿真")
         with self.assertRaises(KeyError):
-            set_model(2)
+            set_model(6)
         with self.assertRaises(KeyError):
-            EDFitter(2)
+            EDFitter(6)
 
     def test_gradual_edges(self):
         plateau = build_formula_ed_model("formula_plateau")

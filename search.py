@@ -24,7 +24,7 @@ from measurement_data import MODEL_NAMES
 # -------------------- 修改这里切换模型和运行参数 --------------------
 TARGET = "ed"  # 可选："ed" 最大化 ED；"ed_pf_ratio" 最大化 ED/PF。
 ED_SOURCE = "fitted"  # "fitted" 数据拟合；"formula" 数学公式。
-DATA_MODEL = 3  # 1=P3试验，3=LT精细仿真，4/5/6=中心/偏置/多峰高斯。
+DATA_MODEL = 2  # 1=P3试验，2=LT整机仿真，3/4/5=中心/偏置/多峰高斯。
 FIT_METHOD = "rbf"  # rbf / manual_gpr / linear / polynomial / svm。
 FORMULA_MODEL = "formula_gaussian"  # 平台区用 formula_plateau，截断峰用 formula_truncated_peak。
 RANDOM_SEED = 42
@@ -45,7 +45,7 @@ _energy_model = None
 
 
 def set_ed_model(source="fitted", *, formula_model="formula_gaussian",
-                 data_model=3, fit_method="rbf", fit_parameters=None,
+                 data_model=DATA_MODEL, fit_method="rbf", fit_parameters=None,
                  seed=42, peaks=None, **sampling_parameters):
     """选择 ED 空间模型；量测与抖动共用原 fitter.EDPFModel。
 

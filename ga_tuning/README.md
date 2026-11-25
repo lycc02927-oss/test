@@ -1,6 +1,6 @@
 # 三种单峰 ED 工况的二进制遗传算法
 
-在 LT 精细仿真（3）、中心高斯（4）和偏置高斯（5）上选择**同一组 BO 配方**。内层 BO 选下一次采样的三维位置。外层 GA 只选择 BO 的九个参数。设备接口和 UI 均不参与。
+在 LT 整机仿真（2）、中心高斯（3）和偏置高斯（4）上选择**同一组 BO 配方**。内层 BO 选下一次采样的三维位置。外层 GA 只选择 BO 的九个参数。设备接口和 UI 均不参与。
 
 [历史四工况的入选配方与独立验证结果](RESULTS.md) · [下载历史四工况工作簿](results/GA_balanced.xlsx)
 
@@ -9,10 +9,10 @@
 在含有 `search.py`、`batch_test.py` 的仓库根目录执行。使用项目现有的 Python 环境，仿真依赖 NumPy、SciPy、Matplotlib，导出 Excel 依赖 openpyxl。本次使用 Python 3.12.14、NumPy 2.3.5、SciPy 1.17.0。新环境可以先运行 `python -m pip install numpy scipy matplotlib openpyxl`。
 
 ```bash
-python -m ga_tuning.run --plan pilot --workers 4 --out ga_pilot_345
+python -m ga_tuning.run --plan pilot --workers 4 --out ga_pilot_234
 ```
 
-打开 `ga_pilot_345/GA_results.xlsx`。先看“入选配方”里的 GA 与基准编号，再去“工况汇总”筛选 `stage=validation`，按工况比较。相同种子是配对试验。单次试验的编号可以关联到“采样轨迹”。
+打开 `ga_pilot_234/GA_results.xlsx`。先看“入选配方”里的 GA 与基准编号，再去“工况汇总”筛选 `stage=validation`，按工况比较。相同种子是配对试验。单次试验的编号可以关联到“采样轨迹”。
 
 | 方案 | 每代配方 | 代数（含初代） | 每个工况的训练种子 | 每个工况的独立验证种子 | 用途 |
 |---|---:|---:|---|---|---|
@@ -21,10 +21,10 @@ python -m ga_tuning.run --plan pilot --workers 4 --out ga_pilot_345
 | balanced | 6 | 3 | 42、43 | 901–905 | 初代覆盖 10–50 个初始点，再用新种子验证 |
 | standard | 12 | 8 | 42–44 | 1001–1010 | 扩大候选覆盖和重复次数 |
 
-三工况试验使用新目录，方便与历史四工况记录区分。
+三工况试验使用新目录。历史工作簿沿用当时编号：旧 2 已删除，旧 3、4、5、6 依次对应现在的 2、3、4、5。
 
 ```bash
-python -m ga_tuning.run --plan balanced --workers 8 --out ga_balanced_345
+python -m ga_tuning.run --plan balanced --workers 8 --out ga_balanced_234
 python -m ga_tuning.run --plan standard --workers 8 --out ga_standard
 ```
 
@@ -64,13 +64,13 @@ python -m ga_tuning.run --plan standard --workers 8 --out ga_standard
 
 ## 一场 BO 如何结束
 
-三个模型都用原始数据编号、RBF 拟合、单次带抖动 ED 观测。4、5 使用中心高斯、偏置高斯对应的数据表。参考值取 `MODEL_DATA[id]` 的最高 ED 数据点，与拟合连续面之间允许有插值差异。
+三个模型均采用 RBF 拟合，每次量测一发带抖动的 ED。3、4 使用中心高斯、偏置高斯对应的数据表。参考值取 `MODEL_DATA[id]` 的最高 ED 数据点，与拟合连续面之间允许有插值差异。
 
 | 模型号 | 工况 | 设计 ED | 峰位 X | 峰位 Y | 峰位 Z |
 |---:|---|---:|---:|---:|---:|
-| 3 | LT 精细仿真 | 0.0266245 | 0 | 0 | 0 |
-| 4 | 中心高斯 | 0.6011 | 0 | 0 | 0 |
-| 5 | 偏置高斯 | 0.6011 | 120 | -80 | 80 |
+| 2 | LT 整机仿真 | 0.0266245 | 0 | 0 | 0 |
+| 3 | 中心高斯 | 0.6011 | 0 | 0 | 0 |
+| 4 | 偏置高斯 | 0.6011 | 120 | -80 | 80 |
 
 1. 用候选配方的 `init_points` 做 LHS 采样，每个点从 fitter 获取一发数据，保留当时的最佳 ED。
 2. 每轮拟合 GP，求 EI 下一个点并采样。更新所有已测点的最高 ED。参考峰值只用于评估和联合停机，峰位不参与选点。
@@ -115,7 +115,7 @@ python -m ga_tuning.run --plan standard --workers 8 --out ga_standard
 保留同目录的 CSV 即可重新导出，无需再做 BO。
 
 ```bash
-python -m ga_tuning.excel ga_balanced_345
+python -m ga_tuning.excel ga_balanced_234
 ```
 
 旧批次 CSV 的 `settings.csv` 没有 `distance_metric` 字段。单独重新导出这些 CSV 会保留当时的历史打分口径；重跑 GA 会写入新口径 `sum_step_max`。
