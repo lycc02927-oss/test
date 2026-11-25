@@ -74,13 +74,32 @@ class GATest(unittest.TestCase):
         self.assertGreater(score(0.01, [1, 0, 0]), score(0.01, [0, 0, 0]))
         self.assertEqual(tuple(MODELS), (2, 3, 4))
 
-    def test_patience_without_ed_accuracy(self):
-        # 常数轨迹第 31 个 BO 点达到停滞门槛，但离设计峰 (1.0) 仍有 40%。
-        check = simulation.batch_test.get_convergence_iteration
-        h = dict(y=np.full(32, .6), best_value=np.full(32, .6), sigma_abs_used=np.zeros(31), n_init=1)
-        self.assertEqual(check(h, 30, 1.0, np.inf), 31)
-        self.assertIsNone(check(h, 30, 1.0, 10.0))
-        self.assertIsNone(check(h, 31, 1.0, np.inf))
+    def test_search_records_patience_separately_from_joint_stop(self):
+        # 压缩到 2 轮以逐点核对：首次停滞、ED 门槛和恰在停滞轮出现的新高。
+        search = simulation.search
+        point = np.zeros(3)
+        with patch.object(search, "get_initial_points", return_value=point[None, :]), \
+             patch.object(search, "fit_gp") as gp, \
+             patch.object(search, "get_next_sample", return_value=(point, 0.0)):
+            gp.return_value.y_mean = 0.
+            gp.return_value.y_std = 1.
+            gp.return_value.kernel = object()
+
+            def run(values, reference=1.0):
+                readings = iter(values)
+                return search.bayesian_optimization(
+                    lambda _: next(readings), search.BOUNDS, init_points=1, max_iter=len(values) - 1,
+                    stop_no_improve=2, reference_value=reference, relative_tolerance=.1, verbose=False)
+
+            low = run([.6] * 6)
+            self.assertEqual((low["patience_round"], low["stop_reason"]), (3, "max_iter"))
+            late_peak = run([.6, .6, .6, .6, 1., 1., 1., 1.])
+            self.assertEqual((late_peak["patience_round"], late_peak["stop_reason"]), (3, "converged"))
+            self.assertEqual(len(late_peak["xi_used"]), 7)
+            new_peak = run([.6, .6, .6, 1., 1., 1., 1.])
+            self.assertEqual(new_peak["patience_round"], 6)
+            self.assertEqual(len(new_peak["xi_used"]), 6)
+            self.assertEqual(len(run([.6] * 6, reference=None)["xi_used"]), 3)
 
     def test_excel_scores_the_requested_distance(self):
         with TemporaryDirectory() as path:
@@ -124,20 +143,22 @@ class GATest(unittest.TestCase):
         recipe = dict(CANDIDATE, n_restarts=70, n_restarts_ei=40)
         original_params = simulation.search.BO_PARAMETERS.copy()
 
-        def observe(case, reference, rounds, patience, percent):
-            self.assertEqual((case["data_model"], case["target"]), (2, "ed"))
-            self.assertEqual((rounds, patience, percent), (BUDGET - recipe["init_points"], PATIENCE, 100 * ED_TOL))
-            self.assertEqual(simulation.search.BO_PARAMETERS["n_restarts_ei"], 40)
-            simulation.search.fit_gp(n_restarts=10)
-            # 到这里已测到适配参数，使用测试异常退出以检查上下文复位。
-            raise StopIteration
-
-        with patch.object(simulation.search, "fit_gp") as gp:
-            with patch.object(simulation.batch_test, "run_search_with_accuracy", observe):
-                with self.assertRaises(StopIteration):
-                    simulation.simulate((recipe, 2, 42))
-            gp.assert_called_once_with(n_restarts=70)
-            self.assertIs(simulation.search.fit_gp, gp)
+        search = simulation.search
+        with patch.object(search, "run_search", wraps=search.run_search) as entry, \
+             patch.object(search, "fit_gp") as gp, \
+             patch.object(search, "get_next_sample", side_effect=StopIteration) as ei:
+            gp.return_value.y_mean = 0.
+            gp.return_value.y_std = 1.
+            with self.assertRaises(StopIteration):
+                simulation.simulate((recipe, 2, 42))
+        options = entry.call_args.kwargs
+        self.assertEqual((options["data_model"], options["seed"]), (2, 42))
+        self.assertEqual(options["max_iter"] + options["init_points"], BUDGET)
+        self.assertEqual(options["stop_no_improve"], PATIENCE)
+        self.assertEqual(options["relative_tolerance"], ED_TOL)
+        self.assertEqual(options["reference_value"], simulation.reference(2)[3])
+        self.assertEqual(gp.call_args.kwargs["n_restarts"], 70)
+        self.assertEqual(ei.call_args.kwargs["n_restarts_ei"], 40)
         self.assertEqual(simulation.search.BO_PARAMETERS, original_params)
 
 

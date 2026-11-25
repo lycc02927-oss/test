@@ -38,6 +38,8 @@ BO_PARAMETERS = dict(
     global_prob=0.40,
     r_frac_min=0.05,
     stop_no_improve=30,
+    n_restarts=10,
+    n_restarts_ei=20,
     ls_bounds=(40.0, 2000.0),
 )
 
@@ -173,11 +175,14 @@ def bayesian_optimization(objective_func, bounds, max_iter=70, init_points=30,
                           sigma3_rel=0.0, xi_init=None, xi_final=None,
                           r_frac_min=0.05, global_prob=0.0, ls_bounds=None,
                           stop_no_improve=10, n_restarts_ei=20,
-                          verbose=True, random_seed=42):
+                          verbose=True, random_seed=42, *, n_restarts=10,
+                          reference_value=None, relative_tolerance=0.10):
     """使用新版 GPR/EI 最大化目标，history 的 ED/PF 与 X、y 逐行对应。
 
     random_seed 控制 LHS、GP 重启及 EI 选点；传 None 可沿用外部随机状态。
     标量目标函数仍可使用；没有量测信息时 ED/PF 历史以 NaN 填充。
+    传 reference_value 时，只在本轮仍无显著改善且相对偏差达标时提前结束。
+    patience_round 记录首次满足停滞条件的 BO 轮数（从 1 开始），与偏差门槛独立。
     """
     if random_seed is not None:
         np.random.seed(random_seed)
@@ -249,6 +254,7 @@ def bayesian_optimization(objective_func, bounds, max_iter=70, init_points=30,
         'distance_to_nearest': [], 'n_init': len(X_init),
         'noise_level': [], 'sigma_abs_used': [], 'xi_used': [],
         'target': getattr(objective_func, 'target', 'objective'),
+        'patience_round': None, 'stop_reason': 'max_iter',
         **measurements,
     }
     start_time = time.time()
@@ -288,7 +294,7 @@ def bayesian_optimization(objective_func, bounds, max_iter=70, init_points=30,
 
         ls_init = float(np.clip(span / 2.0, ls_bounds[0], ls_bounds[1]))
         gpr = fit_gp(X_obs, y_obs, alpha_eff, ls_init, ls_bounds,
-                     n_restarts=10, use_white=use_white, noise_bounds=noise_bounds)
+                     n_restarts=n_restarts, use_white=use_white, noise_bounds=noise_bounds)
         best_norm = (best_robust - gpr.y_mean) / gpr.y_std
         xi_norm = xi_i / gpr.y_std
         min_step_i = 2.0 * (1.0 - t) ** 2
@@ -318,6 +324,15 @@ def bayesian_optimization(objective_func, bounds, max_iter=70, init_points=30,
             print(f"Iter {i + 1:02d}/{max_iter}: xi={xi_i:.4g}, {measurement_text}"
                   f"V={next_y:.6f}, Best={current_best:.6f}, noise={nl_str}")
         if (i - last_improve_iter) >= stop_no_improve:
+            improved_now = current_best - 3.0 * sigma_used > last_improve_best + tol_abs
+            if not improved_now and history['patience_round'] is None:
+                history['patience_round'] = i + 1
+            # GA 提供设计峰值。单独运行且未指定参考值时沿用原有停机方式。
+            if reference_value is not None:
+                allowed_error = abs(reference_value) * (relative_tolerance + 1e-11)
+                if improved_now or abs(current_best - reference_value) > allowed_error:
+                    continue
+            history['stop_reason'] = 'converged'
             if verbose:
                 print(f"\nStop: no improve for {i - last_improve_iter} iters")
             break

@@ -71,7 +71,7 @@ def sheet_rows(directory, key):
 
 
 def export(directory):
-    # 沿用仓库 batch_test 的 Excel 依赖。原始 CSV 始终保留。
+    # 使用 openpyxl 导出。原始 CSV 始终保留。
     from openpyxl import Workbook
     from openpyxl.cell import WriteOnlyCell
     from openpyxl.chart import LineChart, Reference

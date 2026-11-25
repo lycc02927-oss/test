@@ -10,7 +10,7 @@ FAILURE_WEIGHT = 0.50
 
 
 def measure_path(points, best_index):
-    # 沿用 batch_test 的口径：含末次采样回到最终最佳设定点；回位不再采样。
+    # 含末次采样回到最终最佳设定点；回位不再采样。
     route = np.vstack((points, points[best_index]))
     steps = np.abs(np.diff(route, axis=0))
     by_axis = steps.sum(axis=0)
