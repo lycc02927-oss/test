@@ -2,7 +2,7 @@
 import numpy as np
 
 import search
-from .design import BUDGET, ED_TOL, PATIENCE, reference
+from .design import BUDGET, ED_TOL, PATIENCE
 from .objective import metrics
 
 
@@ -18,10 +18,10 @@ def default_recipe():
 
 
 def simulate(task):
-    recipe, model, seed = task
-    peak = reference(model)[3]
+    recipe, name, case, seed = task
+    peak = case.reference[3]
     hist = search.run_search(
-        source="fitted", target="ed", data_model=model, fit_method="rbf", seed=seed,
+        **case.options, target="ed", seed=seed,
         init_points=recipe["init_points"], max_iter=BUDGET - recipe["init_points"],
         n_restarts=recipe["n_restarts"], n_restarts_ei=recipe["n_restarts_ei"],
         xi_init=recipe["xi_init"], xi_final=recipe["xi_final"], sigma3_rel=recipe["sigma3_rel"],
@@ -31,7 +31,7 @@ def simulate(task):
     )
     span = float(np.ptp(search.BOUNDS, axis=1).max())
     result = metrics(hist, peak, span, hist["patience_round"])
-    result.update(model=model, seed=seed)
+    result.update(model=name, seed=seed)
     points = []
     best = -float("inf")
     for idx, (xyz, ed) in enumerate(zip(hist["X"], hist["ed"])):

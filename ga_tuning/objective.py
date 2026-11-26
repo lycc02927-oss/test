@@ -1,12 +1,18 @@
 """从实际采样轨迹独立计算误差、路程与得分。越小越好。"""
+from collections import defaultdict
 from statistics import mean
 
 import numpy as np
 
-from .design import BUDGET, ED_TOL, MODELS
+from .design import BUDGET, ED_TOL
 
 WEIGHTS = (3, 5, 2)
-FAILURE_WEIGHT = 0.50
+FAILURE_DIVISOR = 6
+
+
+def composite_loss(base_loss, failure_rate):
+    """失败率取 0 到 1；全失败也只在基础 loss 上加 1/6。"""
+    return base_loss + failure_rate / FAILURE_DIVISOR
 
 
 def measure_path(points, best_index):
@@ -30,7 +36,7 @@ def metrics(history, peak, span, patience_round):
     base_loss = sum(w * v for w, v in zip(WEIGHTS, normalized)) / sum(WEIGHTS)
     # BO 在预算内曾满足 30 轮判据即算通过这一项；ED 准确度另有连续误差项。
     failed = int(patience_round is None)
-    loss = (1 - FAILURE_WEIGHT) * base_loss + FAILURE_WEIGHT * failed
+    loss = composite_loss(base_loss, failed)
     return dict(initial=history["n_init"], bo=n - history["n_init"], samples=n,
                 stop=history["stop_reason"], success=int(history["stop_reason"] == "converged"),
                 design_ed=peak, best_ed=best, best_sample=best_index + 1,
@@ -42,7 +48,14 @@ def metrics(history, peak, span, patience_round):
 
 
 def recipe_means(trials):
-    """先对各模型的重复试验取平均，再给三个模型相同权重。"""
-    groups = [[row for row in trials if row["model"] == model] for model in MODELS]
-    return {key: mean(mean(row[key] for row in group) for group in groups)
-            for key in ("base_loss", "patience_failed", "loss")}
+    """同一配方先在每个工况内对种子取平均，再对所选工况等权平均。"""
+    groups = defaultdict(list)
+    for row in trials:
+        groups[row["model"]].append(row)
+
+    def model_average(field):
+        return mean(mean(r[field] for r in runs) for runs in groups.values())
+
+    base = model_average("base_loss")
+    failed = model_average("patience_failed")
+    return dict(base_loss=base, patience_failed=failed, loss=composite_loss(base, failed))

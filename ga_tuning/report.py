@@ -4,9 +4,9 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import mean
 
-from .design import BUDGET, ED_TOL, GA_SEED, MODELS, PATIENCE, reference
+from .design import BUDGET, ED_TOL, GA_SEED, PATIENCE
 from .encoding import GRID, WIDTH, decode
-from .objective import FAILURE_WEIGHT, WEIGHTS
+from .objective import FAILURE_DIVISOR, WEIGHTS, composite_loss
 
 
 def csv_rows(path, rows, append=False):
@@ -29,9 +29,10 @@ def overall_summary(rows):
     for (stage, recipe), models in groups.items():
         result = dict(stage=stage, recipe=recipe, runs=sum(r["runs"] for r in models),
                       hits=sum(r["hits"] for r in models))
-        for metric in ("failure_rate", "mean_base_loss", "mean_loss", "mean_error",
+        for metric in ("failure_rate", "mean_base_loss", "mean_error",
                        "mean_samples", "mean_bo", "mean_travel", "mean_sum_step_max"):
             result[metric] = mean(r[metric] for r in models)
+        result["mean_loss"] = composite_loss(result["mean_base_loss"], result["failure_rate"])
         results.append(result)
     ranked = []
     for stage in ("train", "validation"):
@@ -43,7 +44,7 @@ def overall_summary(rows):
 
 
 class Recorder:
-    def __init__(self, directory, plan):
+    def __init__(self, directory, plan, models):
         self.dir = Path(directory)
         self.population = plan.population
         # 已有结果不覆写，以免把两次实验的轨迹混在一起。
@@ -57,15 +58,24 @@ class Recorder:
                         ga_seed=GA_SEED, patience=PATIENCE, error_limit=ED_TOL, sample_cap=BUDGET,
                         axis_span=span, distance_cap=BUDGET * span, weight_error=WEIGHTS[0],
                         weight_samples=WEIGHTS[1], weight_travel=WEIGHTS[2], distance_metric="sum_step_max",
-                        failure_weight=FAILURE_WEIGHT)
+                        failure_divisor=FAILURE_DIVISOR)
         self.write("settings", [settings])
         self.write("seeds", [dict(stage=stage, seed=s) for stage, seeds in
                              (("train", plan.train), ("validation", plan.validation)) for s in seeds])
-        models = []
-        for m, label in MODELS.items():
-            x, y, z, ed = reference(m)
-            models.append(dict(model=m, name=label, design_ed=ed, x=x, y=y, z=z))
-        self.write("models", models)
+        model_rows, peak_rows = [], []
+        for name, case in models.items():
+            options = case.options
+            x, y, z, ed = case.reference
+            model_rows.append(dict(model=name, source=options["source"], data_model=options.get("data_model"),
+                                   fit_method=options.get("fit_method"), formula_model=options.get("formula_model"),
+                                   design_ed=ed, x=x, y=y, z=z))
+            for index, peak in enumerate(options.get("peaks", []), 1):
+                cx, cy, cz = peak["center"]
+                sx, sy, sz = peak["sigma"]
+                peak_rows.append(dict(model=name, peak_index=index, peak_ed=peak["peak_ed"],
+                                      center_x=cx, center_y=cy, center_z=cz, sigma_x=sx, sigma_y=sy, sigma_z=sz))
+        self.write("models", model_rows)
+        self.write("peaks", peak_rows)
         self.write("grid", [dict(parameter=k, bits=WIDTH[k], index=i, value=v)
                             for k, levels in GRID.items() for i, v in enumerate(levels)])
 
@@ -88,7 +98,8 @@ class Recorder:
     def finish(self, winner, default, generations, members):
         self.write("generations", [dict(row, champion=self.recipes[row["champion"]]) for row in generations])
         self.write("members", [dict(generation=r["generation"], rank=r["rank"],
-                                    recipe=self.recipes[r["chromosome"]], loss=r["loss"]) for r in members])
+                                    recipe=self.recipes[r["chromosome"]], mean_base_loss=r["mean_base_loss"],
+                                    failure_rate=r["failure_rate"], loss=r["loss"]) for r in members])
         groups = defaultdict(list)
         for trial in self.trials:
             key = (trial["stage"], trial["recipe"], trial["model"])
@@ -99,8 +110,9 @@ class Recorder:
             row = dict(stage=stage, recipe=recipe, model=model, runs=len(trials),
                        hits=hits, success_rate=hits / len(trials),
                        failure_rate=mean(t["patience_failed"] for t in trials))
-            for metric in ("best_ed", "error", "samples", "bo", "travel", "sum_step_max", "base_loss", "loss"):
+            for metric in ("best_ed", "error", "samples", "bo", "travel", "sum_step_max", "base_loss"):
                 row["mean_" + metric] = mean(t[metric] for t in trials)
+            row["mean_loss"] = composite_loss(row["mean_base_loss"], row["failure_rate"])
             summary.append(row)
         self.write("summary", summary)
         self.write("overall", overall_summary(summary))
@@ -124,7 +136,7 @@ def plot_progress(rows, path, population):
     ax.plot(generations, best, color="#006c78", marker="o", label="Best training loss")
     ax.scatter(0, best[0], s=75, marker="D", color="#252b35", zorder=3)
     ax.set(title=f"GA training  |  {population} individuals, {generations[-1]} generations",
-           xlabel="GA generation (0 = default BO)", ylabel="Weighted loss (lower is better)")
+           xlabel="GA generation (0 = default BO)", ylabel="Composite loss (lower is better)")
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.grid(axis="y", alpha=.25)
     ax.legend()

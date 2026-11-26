@@ -6,18 +6,19 @@ from pathlib import Path
 TABS = {
     "selection": "入选配方", "overall": "配方总评", "summary": "工况汇总", "trials": "逐次试验",
     "points": "采样轨迹", "recipes": "全部配方", "generations": "代际进展",
-    "members": "每代成员", "models": "模型参考", "settings": "试验设置",
+    "members": "每代成员", "models": "模型参考", "peaks": "公式峰参数", "settings": "试验设置",
     "seeds": "随机种子", "grid": "编码档位",
 }
-TEXT = {"role", "stage", "phase", "stop", "chromosome", "parameter", "name", "plan", "distance_metric"}
+TEXT = {"role", "stage", "phase", "stop", "chromosome", "parameter", "name", "plan", "distance_metric",
+        "source", "fit_method", "formula_model"}
 PERCENT = {"error", "mean_error", "error_limit", "success_rate", "worst_failure_rate",
-           "mean_failure_rate", "failure_rate", "failure_weight", "crossover", "bit_mutation"}
+           "mean_failure_rate", "failure_rate", "population_failure_rate", "failure_weight", "crossover", "bit_mutation"}
 
 
 def parse(key, value):
     if not value:
         return None
-    if key in TEXT:
+    if key in TEXT or (key == "model" and not value.isdecimal()):
         return value
     # 初始点数、试验编号保留整数类型；ED 和偏差保留浮点精度。
     return float(value) if "." in value or "e" in value.lower() else int(value)
@@ -36,7 +37,8 @@ def sheet_rows(directory, key):
     if key == "trials":
         with (directory / "settings.csv").open(encoding="utf-8-sig", newline="") as config:
             # 老批次的 CSV 未声明计分距离，重导历史工作簿时保留其原始公式。
-            distance_metric = next(csv.DictReader(config)).get("distance_metric", "travel")
+            config_row = next(csv.DictReader(config))
+            distance_metric = config_row.get("distance_metric", "travel")
     with (directory / (key + ".csv")).open(encoding="utf-8-sig", newline="") as f:
         reader = csv.reader(f)
         headers = next(reader)
@@ -62,10 +64,12 @@ def sheet_rows(directory, key):
                          f"+{cost_distance}/{settings}$I$2*{settings}$L$2)"
                          f"/SUM({settings}$J$2:$L$2)")
                 if "patience_failed" in col:
-                    # 新批次 N2 是失败率权重；历史批次保留其原始评分公式。
-                    weight = f"{settings}$N$2"
                     failed = col["patience_failed"] + str(n)
-                    score = f"=(1-{weight})*({score[1:]})+{weight}*{failed}"
+                    parameter = f"{settings}$N$2"
+                    if "failure_divisor" in config_row:
+                        score = f"{score}+{failed}/{parameter}"
+                    else:  # 旧批次 N2 是失败率权重。
+                        score = f"=(1-{parameter})*({score[1:]})+{parameter}*{failed}"
                 values += [f"=ABS({ed}-{peak})/ABS({peak})", f"=MAX({','.join(axes)})", score]
             yield values
 
@@ -80,6 +84,8 @@ def export(directory):
     # standard 会有较多轨迹行，流式写入使内存占用与行数无关。
     workbook = Workbook(write_only=True)
     for key, title in TABS.items():
+        if key == "peaks" and not (directory / "peaks.csv").exists():
+            continue
         sheet = workbook.create_sheet(title)
         rows = sheet_rows(directory, key)
         headers = next(rows)

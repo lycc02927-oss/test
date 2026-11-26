@@ -2,6 +2,7 @@
 import random
 from statistics import mean
 
+from .objective import composite_loss
 from .encoding import BITS, GRID, decode, encode, random_chromosome, repair
 
 
@@ -53,6 +54,8 @@ def evolve(settings, seed, default, evaluate):
     baseline = evaluate("default", default, 0)
     history = [dict(generation=0, champion="default", mean_loss=baseline["loss"],
                     population_mean_loss=baseline["loss"], improvement=0.0,
+                    population_mean_base_loss=baseline["base_loss"],
+                    population_failure_rate=baseline["patience_failed"],
                     mean_base_loss=baseline["base_loss"], failure_rate=baseline["patience_failed"],
                     stale=0, selection_power=None, crossover=None, bit_mutation=None, new_recipes=1)]
     population = initial_population(default, settings.population, rng)
@@ -69,13 +72,17 @@ def evolve(settings, seed, default, evaluate):
         stale = 0 if loss < best_loss else stale + 1
         best_loss = loss  # 精英保留，上一代冠军参加本代排名。
         power, crossover, mutation = rates(stale)
+        population_base = mean(scores[b]["base_loss"] for b in ranked)
+        population_failure = mean(scores[b]["patience_failed"] for b in ranked)
         history.append(dict(generation=generation, champion=champion, mean_loss=loss,
-                            population_mean_loss=mean(scores[b]["loss"] for b in ranked),
+                            population_mean_loss=composite_loss(population_base, population_failure),
+                            population_mean_base_loss=population_base, population_failure_rate=population_failure,
                             improvement=baseline["loss"] - loss, mean_base_loss=score["base_loss"],
                             failure_rate=score["patience_failed"], stale=stale,
                             selection_power=power, crossover=crossover, bit_mutation=mutation,
                             new_recipes=len(fresh)))
-        members.extend(dict(generation=generation, rank=i, chromosome=bits, loss=scores[bits]["loss"])
+        members.extend(dict(generation=generation, rank=i, chromosome=bits, loss=scores[bits]["loss"],
+                            mean_base_loss=scores[bits]["base_loss"], failure_rate=scores[bits]["patience_failed"])
                        for i, bits in enumerate(ranked, 1))
         print(f"第 {generation} 代完成，最佳 loss={loss:.6f}，较默认降低 {baseline['loss'] - loss:+.6f}",
               flush=True)
